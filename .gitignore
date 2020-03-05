@@ -1,0 +1,9 @@
+#global folders
+bin/
+obj/
+.vs/
+
+#global files
+*.user
+*.pubxml
+gi-*
