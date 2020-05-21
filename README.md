@@ -31,4 +31,3 @@ Nearly all code was written by myself; any that was not, is preceded by a commen
 The following parsers were written from scratch using the formats' specifications, with regard to PDFs: JPEG, PNG, ICC, OTF, CFF, T6, LZW.
 # Contact
 Use [GitHub](https://github.com/elicym/peapdf/issues) to post any issues.
-Alternatively, email me directly at elliott@seapeayou.net.
