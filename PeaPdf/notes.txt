@@ -1,0 +1,20 @@
+﻿A wrapper wraps a PDF object. It keeps a reference to the PDF object (its PdfObject, sometimes PdfXXX), without replacing it,
+in case the object has additional data we don't support. This also simplifies, as the parent needs no change, which continues pointing to the same object.
+If there is no extra data needed to be saved, and the parent is updated, then it may be replaced.
+Adding a new PDF object obviously does require a change to the parent.
+
+Some wrappers last for the lifetime of PDF, such as Page (unless one is added or deleted).
+Most however are temporary, being instantiated when needed. If changes are made, UpdateObjects must be called afterwards, to update the PDF object, if there is a UpdateObjects method.
+Multiple wrappers should not be created for a single object. The parent should cache the wrapper created.
+The PDF object may be modified even before UpdateObjects is called, if modifying methods/properties are called on the wrapper, or it may wait for UpdateObjects.
+Calling UpdateObjects on a parent wrapper, also calls UpdateObjects on any descendant wrapper obtained via the parent.
+
+There is a potential for 2 wrappers to wrap the same PDF object, retrieved from different parents, for example 2 pages could theoretically point to the same Contents stream.
+This can cause issues when saving, or if a wrapper replaces its PDF object.
+However I'm not aware of such a scenario in real life, but to consider.
+UpdateObjects on wrappers is not public, calling Save on PDF, or rendering it, should call UpdateObjects where needed.
+
+The spelling in code is 'Pdf' besides for the main 'PDF' class. Most classes are not prefixed with Pdf. 
+An exception is the PDF objects, since they are common words - this includes field/property names of these objects.
+
+PeaPdf is not intended to allow for manual editing of objects.

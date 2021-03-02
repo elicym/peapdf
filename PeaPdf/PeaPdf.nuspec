@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>SeaPeaYou.PeaPdf</id>
+    <version>1.0.0</version>
+    <authors>Elliott Cymerman</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">Apache-2.0</license>
+    <licenseUrl>https://licenses.nuget.org/Apache-2.0</licenseUrl>
+    <projectUrl>https://github.com/elicym/peapdf</projectUrl>
+    <description>PeaPdf is an open-source project, to render, create, and modify PDFs.</description>
+    <tags>pdf render draw display convert image create modify edit</tags>
+    <dependencies>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="SkiaSharp" version="1.68.3" exclude="Build,Analyzers" />
+        <dependency id="System.Memory" version="4.5.4" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="bin\Release\netstandard2.0\PeaPdf.dll" target="lib\netstandard2.0" />
+    <file src="bin\Release\netstandard2.0\PeaPdf.pdb" target="lib\netstandard2.0" />
+    <file src="Native\PeaPdfNative_x64.dll" target="runtimes\win-x64\native\PeaPdfNative.dll" />
+    <file src="Native\PeaPdfNative_Win32.dll" target="runtimes\win-x86\native\PeaPdfNative.dll" />
+    <file src="SeaPeaYou.PeaPdf.targets" target="build\net45\SeaPeaYou.PeaPdf.targets" />
+  </files>
+</package>

@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 

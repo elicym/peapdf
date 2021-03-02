@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,25 +21,29 @@ namespace SeaPeaYou.PeaPdf
             Keyword = keyword;
         }
 
-        public void Write(Stream stream, bool terminateWithSpace)
+        public TwoNums(ObjID objID, string keyword) : this(objID.ObjNum, objID.GenNum, keyword) { }
+
+        public void Write(PdfWriter w)
         {
-            stream.WriteString(Num1.ToString());
-            stream.WriteByte((byte)' ');
-            stream.WriteString(Num2.ToString());
+            if (w.NeedsDeliminator)
+                w.WriteByte(' ');
+            w.WriteString(Num1.ToString());
+            w.WriteByte(' ');
+            w.WriteString(Num2.ToString());
             if (Keyword != null)
             {
-                stream.WriteByte((byte)' ');
-                stream.WriteString(Keyword);
+                w.WriteByte(' ');
+                w.WriteString(Keyword);
             }
-            stream.WriteByte((byte)(terminateWithSpace ? ' ' : '\n'));
+            w.NeedsDeliminator = true;
         }
 
         public readonly int Num1, Num2;
         public readonly string Keyword;
 
-        public static TwoNums TryRead(FParse fParse, string keyword)
+        public static TwoNums TryRead(PdfReader r, string keyword)
         {
-            var clone = fParse.Clone();
+            var clone = r.Clone();
 
             int? num1 = ReadNum(clone);
             if (num1 == null)
@@ -56,18 +60,19 @@ namespace SeaPeaYou.PeaPdf
             {
                 if (clone.ReadByte() != ' ')
                     return null;
-                if (!clone.ReadString(keyword))
+                var str = clone.ReadStringUntilDelimiter();
+                if (str != keyword)
                     return null;
             }
 
-            fParse.Pos = clone.Pos;
+            r.Pos = clone.Pos;
 
             return new TwoNums(num1.Value, num2.Value, keyword);
         }
 
-        static int? ReadNum(FParse fParse)
+        static int? ReadNum(PdfReader r)
         {
-            var str = fParse.ReadStringUntilDelimiter();
+            var str = r.ReadStringUntilDelimiter();
             if (str.Length == 0 || str.Any(x => !char.IsDigit(x)))
                 return null;
             return int.Parse(str);

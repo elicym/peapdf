@@ -1,23 +1,26 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace SeaPeaYou.PeaPdf
 {
+
+    //immutable
     class PdfNumeric : PdfObject
     {
         public readonly decimal Value;
 
-        public PdfNumeric(FParse fParse)
+        public PdfNumeric(PdfReader r)
         {
-            var str = fParse.ReadStringUntilDelimiter();
+            var str = r.ReadStringUntilDelimiter();
             Value = decimal.Parse(str);
         }
 
@@ -25,11 +28,20 @@ namespace SeaPeaYou.PeaPdf
 
         public override string ToString() => Value.ToString();
 
-        public override void Write(Stream stream, PDF pdf, PdfIndirectReference iRef)
+        internal override void Write(PdfWriter w, ObjID? encryptionObjID)
         {
-            stream.WriteString(Value.ToString());
-            stream.WriteByte((byte)' ');
+            //if (++i > 2000) Debugger.Break();
+            if (w.NeedsDeliminator)
+                w.WriteByte(' ');
+            w.WriteString(Value.ToString());
+            w.NeedsDeliminator = true;
         }
+
+        public override PdfObject Clone() => this; //being immutable
+
+        public static explicit operator PdfNumeric(int? v) => v == null ? null : new PdfNumeric(v.Value);
+        public static explicit operator PdfNumeric(decimal? v) => v == null ? null : new PdfNumeric(v.Value);
+        public static explicit operator PdfNumeric(float? v) => v == null ? null : new PdfNumeric((decimal)v.Value);
 
     }
 }

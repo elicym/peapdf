@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,7 +10,7 @@ using System.Text;
 
 namespace SeaPeaYou.PeaPdf.Filters
 {
-    //from https://github.com/coding-horror/ascii85/ MIT, no copyright notice there
+    //from https://github.com/coding-horror/ascii85/ MIT
     class ASCII85Decode
     {
 

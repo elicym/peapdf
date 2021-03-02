@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -8,38 +8,41 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using System.Collections.ObjectModel;
 
 namespace SeaPeaYou.PeaPdf
 {
+
+    //immutable
     class PdfString : PdfObject
     {
 
-        public readonly byte[] Value;
+        public readonly byte[] Value; //should be IReadOnlyList, but causes issues, eg can't use Array.Copy on it
 
-        public PdfString(FParse fParse, PdfIndirectReference iRef)
+        public PdfString(PdfReader r, ObjID? baseObjID)
         {
             var byteList = new List<byte>();
-            var firstChar = fParse.ReadByte();
+            var firstChar = r.ReadByte();
             if (firstChar == '(')
             {
                 int unClosed = 0;
-                while (!fParse.AtEnd)
+                while (!r.AtEnd)
                 {
-                    var c = fParse.ReadByte();
+                    var c = r.ReadByte();
                     switch (c)
                     {
                         case (byte)'(': unClosed++; goto default;
                         case (byte)')':
                             if (unClosed == 0)
                             {
-                                Value = fParse.Decrypt(byteList.ToArray(), iRef);
+                                Value = r.Decrypt(byteList.ToArray(), baseObjID);
                                 return;
                             }
                             unClosed--;
                             goto default;
                         case (byte)'\\':
                             {
-                                var n = fParse.ReadByte();
+                                var n = r.ReadByte();
                                 switch (n)
                                 {
                                     case (byte)'n': byteList.Add((byte)'\n'); break;
@@ -51,9 +54,9 @@ namespace SeaPeaYou.PeaPdf
                                     case (byte)')': byteList.Add((byte)')'); break;
                                     case (byte)'\n': break;
                                     case (byte)'\r':
-                                        if (!fParse.AtEnd && fParse.PeekByte == '\n')
+                                        if (!r.AtEnd && r.PeekByte == '\n')
                                         {
-                                            fParse.Pos++;
+                                            r.Pos++;
                                         }
                                         break;
                                     case (byte)'\\': byteList.Add((byte)'\\'); break;
@@ -61,16 +64,16 @@ namespace SeaPeaYou.PeaPdf
                                         {
                                             if (!Utils.IsDigit(n))
                                             {
-                                                fParse.Pos--;
+                                                r.Pos--;
                                                 continue; //just ignore slash
                                             }
                                             byte?[] digits = { n, null, null };
-                                            if (Utils.IsDigit(fParse.PeekByte))
+                                            if (Utils.IsDigit(r.PeekByte))
                                             {
-                                                digits[1] = fParse.ReadByte();
-                                                if (Utils.IsDigit(fParse.PeekByte))
+                                                digits[1] = r.ReadByte();
+                                                if (Utils.IsDigit(r.PeekByte))
                                                 {
-                                                    digits[2] = fParse.ReadByte();
+                                                    digits[2] = r.ReadByte();
                                                 }
                                             }
 
@@ -86,9 +89,9 @@ namespace SeaPeaYou.PeaPdf
                             }
                         case (byte)'\r':
                             {
-                                if (fParse.PeekByte == '\n')
+                                if (r.PeekByte == '\n')
                                 {
-                                    fParse.Pos++;
+                                    r.Pos++;
                                 }
                                 byteList.Add((byte)'\n');
                                 break;
@@ -101,9 +104,9 @@ namespace SeaPeaYou.PeaPdf
             if (firstChar == '<')
             {
                 byte? prevChar = null;
-                while (!fParse.AtEnd)
+                while (!r.AtEnd)
                 {
-                    var c = fParse.ReadByte();
+                    var c = r.ReadByte();
                     if (c == '>')
                     {
                         if (prevChar != null)
@@ -111,7 +114,7 @@ namespace SeaPeaYou.PeaPdf
                             byteList.Add((byte)(Utils.ReadHexDigit(prevChar.Value) * 16));
                             prevChar = null;
                         }
-                        Value = fParse.Decrypt(byteList.ToArray(), iRef);
+                        Value = r.Decrypt(byteList.ToArray(), baseObjID);
                         return;
                     }
                     if (Utils.IsWhiteSpace(c))
@@ -134,58 +137,98 @@ namespace SeaPeaYou.PeaPdf
             throw new FormatException();
         }
 
-        public override string ToString()
+        public PdfString(string str)
         {
-            return Encoding.UTF8.GetString(Value);
+            var ascii = str.All(x => x < 128);
+            if (ascii)
+            {
+                Value = Encoding.ASCII.GetBytes(str);
+            }
+            else
+            {
+                var bytes = Encoding.UTF8.GetBytes(str);
+                var value = new byte[bytes.Length + 3];
+                value[0] = 239; value[1] = 187; value[2] = 191;
+                bytes.CopyTo(value.AsSpan(3));
+                Value = value;
+            }
         }
 
-        public override void Write(Stream stream, PDF pdf, PdfIndirectReference iRef)
+        public PdfString(byte[] bytes) => Value = bytes;
+
+        public override string ToString()
+        {
+            var bytes = Value.ToArray();
+            if (bytes.Length >= 2 && bytes[0] == 254 && bytes[1] == 255)
+            {
+                for (int i = 0; i < bytes.Length; i += 2)
+                {
+                    var tmp = bytes[i];
+                    bytes[i] = bytes[i + 1];
+                    bytes[i + 1] = tmp;
+                }
+                return Encoding.Unicode.GetString(bytes);
+            }
+            if (bytes.Length >= 3 && bytes[0] == 239 && bytes[1] == 187 && bytes[2] == 191)
+            {
+                return Encoding.UTF8.GetString(bytes);
+            }
+            return Encoding.ASCII.GetString(bytes);
+        }
+
+        internal override void Write(PdfWriter w, ObjID? encryptionObjID)
         {
             if (Value.All(x => (x >= ' ' && x <= '~') || x == '\r' || x == '\n'))
             {
-                stream.WriteByte((byte)'(');
+                w.WriteByte('(');
                 foreach (var b in Value)
                 {
                     switch (b)
                     {
                         case (byte)'\r':
-                            stream.WriteByte((byte)'\\');
-                            stream.WriteByte((byte)'r');
+                            w.WriteByte('\\');
+                            w.WriteByte('r');
                             break;
                         case (byte)'\n':
-                            stream.WriteByte((byte)'\\');
-                            stream.WriteByte((byte)'n');
+                            w.WriteByte('\\');
+                            w.WriteByte('n');
                             break;
                         case (byte)'(':
-                            stream.WriteByte((byte)'\\');
-                            stream.WriteByte((byte)'(');
+                            w.WriteByte('\\');
+                            w.WriteByte('(');
                             break;
                         case (byte)')':
-                            stream.WriteByte((byte)'\\');
-                            stream.WriteByte((byte)')');
+                            w.WriteByte('\\');
+                            w.WriteByte(')');
                             break;
                         case (byte)'\\':
-                            stream.WriteByte((byte)'\\');
-                            stream.WriteByte((byte)'\\');
+                            w.WriteByte('\\');
+                            w.WriteByte('\\');
                             break;
                         default:
-                            stream.WriteByte(b);
+                            w.WriteByte(b);
                             break;
                     }
                 }
-                stream.WriteByte((byte)')');
+                w.WriteByte(')');
             }
             else
             {
-                stream.WriteByte((byte)'<');
+                w.WriteByte('<');
                 foreach (var b in Value)
                 {
-                    stream.WriteHex(b);
+                    w.WriteHex(b);
                 }
-                stream.WriteByte((byte)'>');
+                w.WriteByte('>');
 
             }
         }
+
+        public override PdfObject Clone() => this; //being immutable
+
+        public static explicit operator PdfString(string str) => str == null ? null : new PdfString(str);
+        public static explicit operator PdfString(byte[] bytes) => new PdfString(bytes);
+
 
     }
 }

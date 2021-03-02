@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -9,10 +9,19 @@ using System.Text;
 
 namespace SeaPeaYou.PeaPdf
 {
-    class ByteReader
+    interface IByteReader
     {
+        int Pos { get; set; }
+        byte ReadByte();
+        int ReadShort();
+        int ReadInt();
+        void SkipBytes(int count);
+    }
+
+    class ByteReader : IByteReader
+    {
+        public int Pos { get; set; }
         protected byte[] Bytes;
-        public int Pos = 0;
 
         public ByteReader(byte[] bytes, int pos = 0) => (this.Bytes, this.Pos) = (bytes, pos);
 
@@ -62,11 +71,44 @@ namespace SeaPeaYou.PeaPdf
         public bool AtEnd => Pos == Bytes.Length;
     }
 
+    class ByteReaderLE : IByteReader
+    {
+        public int Pos { get; set; }
+        protected byte[] Bytes;
+
+        public ByteReaderLE(byte[] bytes, int pos = 0) => (this.Bytes, this.Pos) = (bytes, pos);
+
+        public byte ReadByte() => Bytes[Pos++];
+
+        public int ReadShort() => ReadByte() | (ReadByte() << 8);
+
+        public int ReadInt() => ReadByte() | (ReadByte() << 8) | (ReadByte() << 16) | (ReadByte() << 24);
+
+        public void SkipBytes(int count) => Pos += count;
+
+    }
+
     class ByteWriter
     {
         List<byte> bytes = new List<byte>();
 
+        public int Count => bytes.Count;
+
         public void WriteByte(byte b) => bytes.Add(b);
+        public void WriteByte(char c) => bytes.Add((byte)c);
+        public void WriteBytes(IEnumerable<byte> b) => bytes.AddRange(b);
+        public void WriteShort(int n)
+        {
+            bytes.Add((byte)(n >> 8));
+            bytes.Add((byte)(n >> 0));
+        }
+        public void WriteInt(int n)
+        {
+            bytes.Add((byte)(n >> 24));
+            bytes.Add((byte)(n >> 16));
+            bytes.Add((byte)(n >> 8));
+            bytes.Add((byte)(n >> 0));
+        }
 
         public byte[] ToArray() => bytes.ToArray();
     }

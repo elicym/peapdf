@@ -1,145 +1,419 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
 using System;
 using System.Linq;
-using System.IO;
-using System.Text;
-using System.Collections;
 using System.Collections.Generic;
 using SkiaSharp;
 using System.Diagnostics;
-using System.Security.Cryptography;
 
 namespace SeaPeaYou.PeaPdf
 {
     public class PDF
     {
 
+        public string Password;
+        public List<Page> Pages = new List<Page>();
+        internal readonly W.FileTrailer FileTrailer;
+        internal PdfFile PdfFile;
+
+
         public PDF(byte[] bytes, string password = null)
         {
+            PdfFile = new PdfFile(bytes, password);
 
-            orgBytes = bytes;
-            //read header
-            var fParse = new FParse(this);
-            if (!fParse.ReadString("%PDF-"))
-                throw new FormatException();
-            var version = new PdfNumeric(fParse);
-            //read footer
-            fParse.Pos = bytes.Length - 5;
-            int loopUntil = bytes.Length - 1024;
-            for (; fParse.Pos > loopUntil; fParse.Pos--)
+            FileTrailer = PdfFile.FileTrailer;
+
+            var treeNodeStack = new Stack<W.PageTreeNode>();
+            doTreeNode(FileTrailer.Root.Pages, null);
+
+            void doTreeNode(W.PageTreeNode treeNode, PdfDict resources)
             {
-                if (fParse.PeekString("%%EOF"))
-                    break;
-            }
-            if (fParse.Pos == loopUntil) throw new FormatException("no EOF");
-            loopUntil = fParse.Pos - 30;
-            for (; fParse.Pos > loopUntil; fParse.Pos--)
-            {
-                if (fParse.PeekString("startxref"))
-                    break;
-            }
-            if (fParse.Pos == loopUntil) throw new FormatException("startxref");
-            fParse.ReadStringUntilDelimiter();
-            fParse.SkipWhiteSpace();
-            int startxref = int.Parse(fParse.ReadStringUntilDelimiter());
-            //read xRef
-            fParse.Pos = startxref;
-            xRef = new XRef(fParse);
-            catalog = (PdfDict)xRef.TrailerDict["Root"];
-            var encryptDict = (PdfDict)xRef.TrailerDict["Encrypt"];
-            if (encryptDict != null)
-            {
-                if (!encryptDict["Filter"].As<PdfName>().Equals("Standard"))
-                    throw new NotImplementedException("filter");
-                PdfString O = (PdfString)encryptDict["O"], U = (PdfString)encryptDict["U"];
-                int P = (int)encryptDict["P"];
-
-                var paddedPwd = new byte[32];
-                var paddingNeeded = paddedPwd.Length;
-                if (password != null)
+                treeNodeStack.Push(treeNode);
+                resources = (PdfDict)treeNode.PdfDict["Resources"] ?? resources;
+                foreach (var kid in treeNode.Kids)
                 {
-                    var pwdBytes = Encoding.ASCII.GetBytes(password);
-                    Array.Copy(pwdBytes, paddedPwd, Math.Min(pwdBytes.Length, paddedPwd.Length));
-                    paddingNeeded -= pwdBytes.Length;
-                }
-                if (paddingNeeded > 0)
-                {
-                    Array.Copy(paddingBytes, 0, paddedPwd, paddedPwd.Length - paddingNeeded, paddingNeeded);
-                }
-
-                var md5Input = new List<byte>();
-                md5Input.AddRange(paddedPwd);
-                md5Input.AddRange(O.Value);
-                md5Input.AddRange(BitConverter.GetBytes(P));
-                var fileIDBytes = xRef.TrailerDict["ID"].As<PdfArray>()[0].As<PdfString>().Value;
-                md5Input.AddRange(fileIDBytes);
-                var md5 = MD5.Create();
-                var hash = md5.ComputeHash(md5Input.ToArray());
-                var lengthObj = encryptDict["Length"];
-                var n = (lengthObj != null ? (int)lengthObj : 40) / 8;
-                for (int i = 0; i < 50; i++)
-                {
-                    var firstNBytes = hash.Take(n).ToArray();
-                    hash = md5.ComputeHash(firstNBytes);
-                }
-                var key = hash.Take(n).ToArray();
-
-                md5Input.Clear();
-                md5Input.AddRange(paddingBytes);
-                md5Input.AddRange(fileIDBytes);
-                var h1 = md5.ComputeHash(md5Input.ToArray());
-                var b1 = RC4.Encrypt(key, h1);
-                for (byte i = 1; i <= 19; i++)
-                {
-                    var key1 = (byte[])key.Clone();
-                    for (int j = 0; j < key1.Length; j++)
+                    if (kid.Type == "Pages")
                     {
-                        key1[j] ^= i;
+                        doTreeNode(new W.PageTreeNode(kid), resources);
                     }
-                    b1 = RC4.Encrypt(key1, b1);
+                    else
+                    {
+                        Pages.Add(new Page(kid, treeNodeStack, resources));
+                    }
                 }
-                if (!b1.SequenceEqual(U.Value.Take(b1.Length)))
-                    throw new Exception("invalid password");
-
-                encryptionKey = key;
+                treeNodeStack.Pop();
             }
 
-            pageTreeRoot = new PageTreeNode(this, (PdfDict)catalog["Pages"]);
+        }
 
+        public PDF()
+        {
+            FileTrailer = new W.FileTrailer();
         }
 
         public SKImage Render(int pageNum, float scale)
         {
-            var page = pageTreeRoot.GetPage(pageNum);
+            var page = Pages[pageNum];
             return new Renderer(this, page, scale).SKImage;
         }
 
-        internal byte[] GetBytes() => orgBytes;
-
-        internal PdfObject Deref(PdfObject obj)
+        public void SetField(string name, string val)
         {
-            if (obj == null)
-                return null;
-            if (obj is PdfIndirectReference iRef)
-                return GetObj(iRef);
-            return obj;
+            var acroForm = FileTrailer.Root.AcroForm;
+            if (acroForm == null)
+                throw new Exception("No form found.");
+            W.Field matchingField = null;
+            findField(acroForm.Fields, "");
+            if (matchingField == null)
+                throw new Exception("Field not found.");
+
+            var field = matchingField;
+            field.V = new PdfString(val);
+            var kids = field.Kids;
+            var widgetDict = ((PdfName)field.PdfDict["Subtype"])?.String == "Widget" ? field.PdfDict
+                : ((kids != null && kids.Value.Count > 0) ? kids.Value[0] : null);
+            if (widgetDict != null)
+            {
+                var widget = new W.Annotation(widgetDict);
+
+                var daCS = W.ContentStream.ParseInstructions(field.DA.Value);
+                var Tf = daCS.OfType<CS.Tf>().Last();
+                if (Tf.size == 0) Tf.size = 11;
+                var DR = field.DR ?? acroForm.DR;
+                var fontDict = (PdfDict)DR.Font[Tf.font];
+                var font = new Font(fontDict);
+                var paint = new SKPaint { Typeface = font.Typeface, TextSize = Tf.size * 64 };
+
+                if (widget.AP == null) widget.AP = new W.AppearanceStream(widget.Rect);
+                var cs = widget.AP.N.GetFormXObject();
+                cs.Resources.Font[Tf.font] = fontDict;
+                cs.Instructions.Clear();
+                cs.Instructions.Add(new CS.BMC("Tx"));
+                cs.Instructions.Add(new CS.BT());
+                foreach (var inst in daCS)
+                    cs.Instructions.Add(inst);
+                float boxWidth = widget.Rect.UpperRightX - widget.Rect.LowerLeftX, boxHeight = widget.Rect.UpperRightY - widget.Rect.LowerLeftY;
+                cs.PdfStream.Dict["BBox"] = new W.Rectangle(0, 0, boxWidth, boxHeight).PdfArray;
+
+                if (field.Comb)
+                {
+                    if (val.Length > field.MaxLen.Value)
+                        val = val.Substring(0, field.MaxLen.Value);
+                    float cellWidth = boxWidth / field.MaxLen.Value, toCellEnd = 0;
+                    int skipChars = field.Q == W.Alignment.Right ? field.MaxLen.Value - val.Length
+                        : (field.Q == W.Alignment.Centered ? (field.MaxLen.Value - val.Length) / 2 : 0);
+                    cs.Instructions.Add(new CS.Td(cellWidth * skipChars, (boxHeight - Tf.size) / 2 + 1.5f));
+                    var arr = new PdfArray();
+                    foreach (var c in val)
+                    {
+                        var str = c.ToString();
+                        float glyphWidth = paint.GetGlyphWidths(str)[0] / 64, leftPadding = (cellWidth - glyphWidth) / 2;
+                        arr.Add((PdfNumeric)(-(toCellEnd + leftPadding) * 1000 / Tf.size));
+                        arr.Add((PdfString)str);
+                        toCellEnd = cellWidth - glyphWidth - leftPadding;
+                    }
+                    cs.Instructions.Add(new CS.TJ(arr));
+                }
+                else
+                {
+                    var glyphWidths = paint.GetGlyphWidths(val);
+                    float offset = 0;
+                    if (field.Q == W.Alignment.Right)
+                    {
+                        offset = boxWidth - glyphWidths.Sum() - 2;
+                    }
+                    else if (field.Q == W.Alignment.Centered)
+                    {
+                        offset = (boxWidth - glyphWidths.Sum()) / 2;
+                    }
+                    cs.Instructions.Add(new CS.Td(2 + offset, (boxHeight - Tf.size) / 2));
+                    cs.Instructions.Add(new CS.Tj((PdfString)val));
+                }
+                cs.Instructions.Add(new CS.ET());
+                cs.Instructions.Add(new CS.EMC());
+                widget.UpdateObjects();
+            }
+
+            void findField(PdfArray<PdfDict> fieldArr, string runningName)
+            {
+                foreach (PdfDict fieldDict in fieldArr)
+                {
+                    var field = new W.Field(fieldDict);
+                    if (field.T == null)
+                        continue; //is a widget annotation
+                    var totalName = (string.IsNullOrEmpty(runningName) ? "" : (runningName + ".")) + field.T;
+                    var kids = field.Kids;
+                    if (totalName == name)
+                    {
+                        matchingField = field;
+                        return;
+                    }
+                    if (kids != null)
+                    {
+                        findField(kids.Value, totalName);
+                        if (matchingField != null)
+                            return;
+                    }
+                }
+            }
         }
 
-        public int PageCount => pageTreeRoot.Count;
+        public void FlattenFields()
+        {
+            FileTrailer.Root.Dict["AcroForm"] = null;
+            foreach (var page in Pages)
+            {
+                foreach (var annot in page.GetAnnots())
+                {
+                    annot.PdfDict["FT"] = null;
+                    annot.PdfDict["Subtype"] = (PdfName)"FreeText";
+                    annot.PdfDict["Border"] = new PdfArray((PdfNumeric)0, (PdfNumeric)0, (PdfNumeric)0);
+                    annot.PdfDict["F"] = (PdfNumeric)(1 << 2 | 1 << 6 | 1 << 7 | 1 << 9);
+                }
+            }
+        }
 
-        readonly byte[] orgBytes;
-        readonly XRef xRef;
-        readonly PdfDict catalog;
-        readonly byte[] encryptionKey;
-        readonly PageTreeNode pageTreeRoot;
-        readonly Dictionary<PdfIndirectReference, PdfObject> objDict = new Dictionary<PdfIndirectReference, PdfObject>(); //TODO only save root xRef
-        readonly Dictionary<int, ObjectStream> objectStreamDict = new Dictionary<int, ObjectStream>();
+        public byte[] Save(SaveOptions opts = null)
+        {
+            if (opts == null) opts = new SaveOptions();
 
-        internal PdfObject GetPageObj(PdfDict page, PdfName key)
+            var fileID = (part1: opts.FileID ?? (FileTrailer.ID == null ? Guid.NewGuid().ToByteArray() : FileTrailer.ID.Value.Item1), part2: Guid.NewGuid().ToByteArray());
+
+            byte[] encryptionKey = null;
+            if (opts.Encryption != null)
+            {
+                if ((opts.Encryption.OwnerPwd != null && opts.Encryption.OwnerPwd.Any(x => x >= 128))
+                    || (opts.Encryption.OwnerPwd != null && opts.Encryption.OwnerPwd.Any(x => x >= 128)))
+                    throw new NotImplementedException("Only ASCII characters allowed in the password.");
+                var O = Encryption.ComputeO(opts.Encryption.UserPwd, opts.Encryption.OwnerPwd, 128);
+                var P = -3392 | (int)opts.Encryption.UserAccessPermissions;
+                encryptionKey = Encryption.ComputeEncryptionKey(Encryption.PadBytes(opts.Encryption.UserPwd), O, P, fileID.part1, 128);
+                var U = Encryption.ComputeU(encryptionKey, fileID.part1);
+                FileTrailer.Encrypt = new PdfDict
+                {
+                    {"Filter", (PdfName)"Standard" },
+                    {"V", (PdfNumeric)4 },
+                    {"R", (PdfNumeric)4 },
+                    {"O", (PdfString)O },
+                    {"U", (PdfString)U },
+                    {"P", (PdfNumeric)P },
+                    {"Length", (PdfNumeric)128 },
+                    {"StmF",(PdfName)"StdCF" },
+                    {"StrF",(PdfName)"StdCF" },
+                    {"CF", new PdfDict { {"StdCF", new PdfDict { {"AuthEvent",(PdfName)"DocOpen" }, {"CFM",(PdfName)(opts.Encryption.UseRC4? "V2":"AESV2") } } } } }
+                };
+            }
+            else
+            {
+                FileTrailer.Encrypt = null;
+            }
+
+            const int objectStreamLength = 20;
+
+            //prepare objects
+            var root = FileTrailer.Root;
+            root.Pages = new W.PageTreeNode(Pages);
+            Pages.ForEach(x => x.UpdateObjects(root.Pages));
+            FileTrailer.Prev = null;
+
+            //pdf writer
+            var w = new PdfWriter(encryptionKey, opts.Encryption?.UseRC4 ?? false);
+            w.WriteString("%PDF-1.7");
+            w.WriteNewLine();
+            w.WriteByte('%');
+            for (byte i = 170; i < 174; i++)
+                w.WriteByte(i);
+            w.WriteNewLine();
+
+            var objNum = 0;
+            var indirectObjs = new HashSet<PdfObject>();
+            var objsSeen = new HashSet<PdfObject>();
+            var objPath = new List<string>();
+            examineObj(FileTrailer.Dict);
+
+            if (!opts.NoObjectStreams && opts.Encryption == null)
+            {
+                //separate objects between those that can be in object streams and those not
+                List<PdfObject> objsInObjStream = new List<PdfObject>(), objsNotInObjStream = new List<PdfObject>();
+                foreach (var obj in indirectObjs)
+                {
+                    bool notInObjStream = obj is PdfStream || obj == FileTrailer.Encrypt;
+                    (notInObjStream ? objsNotInObjStream : objsInObjStream).Add(obj);
+                }
+                foreach (var obj in objsInObjStream)
+                    w.IndirectObjs.Add(obj, ++objNum);
+                foreach (var obj in objsNotInObjStream)
+                    w.IndirectObjs.Add(obj, ++objNum);
+                //write
+                var xRefEntries = new List<XRefEntry>();
+                var streamObjOffsets = new List<int>();
+                foreach (var chunk in objsInObjStream.Chunk(objectStreamLength))
+                {
+                    var streamObjNum = ++objNum;
+                    var objStreamOffsets = new PdfWriter();
+                    var objStreamW = new PdfWriter
+                    {
+                        IndirectObjs = w.IndirectObjs
+                    };
+                    for (int i = 0; i < chunk.Count; i++)
+                    {
+                        var obj = chunk[i];
+                        var _objNum = w.IndirectObjs[obj];
+                        xRefEntries.Add(new XRefEntry(XRefEntryType.Compressed, streamObjNum, i));
+                        objStreamOffsets.WriteObj((PdfNumeric)_objNum, null, true);
+                        objStreamOffsets.WriteObj((PdfNumeric)objStreamW.Count, null, true);
+                        objStreamW.WriteObj(obj, null, true);
+                    }
+                    objStreamOffsets.WriteByte(' ');
+
+                    var streamBytes = new byte[objStreamOffsets.Count + objStreamW.Count];
+                    Array.Copy(objStreamOffsets.ToArray(), streamBytes, objStreamOffsets.Count);
+                    Array.Copy(objStreamW.ToArray(), 0, streamBytes, objStreamOffsets.Count, objStreamW.Count);
+                    streamObjOffsets.Add(w.Count);
+                    var streamObj = new PdfStream(streamBytes, "FlateDecode", new PdfDict
+                    {
+                        { "Type", (PdfName)"ObjStm" },
+                        { "N", (PdfNumeric)chunk.Count },
+                        { "First", (PdfNumeric)objStreamOffsets.Count }
+                    });
+                    writeBaseObj(streamObj, new ObjID(streamObjNum, 0));
+                }
+                foreach (var obj in objsNotInObjStream)
+                {
+                    var _objNum = w.IndirectObjs[obj];
+                    xRefEntries.Add(new XRefEntry(XRefEntryType.InUse, w.Count, 0));
+                    writeBaseObj(obj, new ObjID(_objNum, 0));
+                }
+                foreach (var streamObjOffset in streamObjOffsets)
+                    xRefEntries.Add(new XRefEntry(XRefEntryType.InUse, streamObjOffset, 0));
+
+                var xRefObjNum = ++objNum;
+                xRefEntries.Add(new XRefEntry(XRefEntryType.InUse, w.Count, 0));
+                var fileTrailerStream = new W.FileTrailerStream(FileTrailer);
+                fileTrailerStream.FileTrailer.Root = FileTrailer.Root;
+                fileTrailerStream.FileTrailer.ID = fileID;
+                var xRef = new XRef.XRefStream(xRefEntries, w.Count, fileTrailerStream);
+                writeBaseObj(xRef.PdfStream, new ObjID(xRefObjNum, 0), true);
+
+                w.WriteString("startxref");
+                w.WriteNewLine();
+                w.WriteString(xRef.Offset.ToString());
+                w.WriteNewLine();
+                w.WriteString("%%EOF");
+            }
+            else
+            {
+                var xRefEntries = new List<XRefInUseEntry>();
+                //assign object numbers before writing
+                foreach (var obj in indirectObjs)
+                {
+                    w.IndirectObjs.Add(obj, ++objNum);
+                }
+                //write
+                foreach (var obj in w.IndirectObjs)
+                {
+                    var objID = new ObjID(obj.Value, 0);
+                    xRefEntries.Add(new XRefInUseEntry(w.Count, objID));
+                    //will be on a new line here
+                    writeBaseObj(obj.Key, objID);
+                }
+
+                FileTrailer.Size = objNum + 1;
+                FileTrailer.ID = fileID;
+                new XRef.XRefTable(xRefEntries, w.Count, FileTrailer).Write(w);
+            }
+
+            return w.ToArray();
+
+            bool getIsIndirect(PdfDict dict)
+            {
+                if (objPath.Count == 1 && objPath[0] == "Info")
+                    return true;
+                var type = dict.Type;
+                if (type == "Catalog" || type == "Pages" || type == "Page" || type == "Font")
+                    return true;
+                if (objPath.Count >= 6 && objPath[0] == "Root" && objPath[1] == "AcroForm" && objPath[2] == "Fields" && objPath[3] == null && objPath.Count % 2 == 0)
+                {
+                    bool match = true;
+                    for (int i = 4; i < objPath.Count; i++)
+                    {
+                        if (objPath[i] != "Kids" || objPath[i + 1] != null)
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match)
+                        return true;
+                }
+                return false;
+            }
+
+            void examineObj(PdfObject obj)
+            {
+
+                if (obj == null) return;
+
+                bool isSimpleObj = obj is PdfName || obj is PdfNumeric,
+                    seen = !isSimpleObj && !objsSeen.Add(obj),
+                    isIndirect = seen || obj is PdfStream;
+                var dict = obj as PdfDict;
+                if (!isIndirect && dict != null && getIsIndirect(dict))
+                    isIndirect = true;
+
+
+                if (isIndirect)
+                {
+                    indirectObjs.Add(obj);
+                    if (seen)
+                        return;
+                }
+
+                if (dict != null)
+                {
+                    recurseDict(dict);
+                }
+                else if (obj is PdfArray arr)
+                {
+                    foreach (var subObj in arr)
+                    {
+                        objPath.Add(null);
+                        examineObj(subObj);
+                        objPath.RemoveAt(objPath.Count - 1);
+                    }
+                }
+                else if (obj is PdfStream stream)
+                {
+                    recurseDict(stream.Dict);
+                }
+
+                void recurseDict(PdfDict dict)
+                {
+                    foreach (var (key, value) in dict)
+                    {
+                        objPath.Add(key);
+                        if (value is PdfIndirectReference) Debugger.Break();
+                        examineObj(value);
+                        objPath.RemoveAt(objPath.Count - 1);
+                    }
+                }
+            }
+
+            void writeBaseObj(PdfObject obj, ObjID objID, bool noEncrypt = false)
+            {
+                new TwoNums(objID, "obj").Write(w);
+                w.WriteNewLine();
+                w.WriteObj(obj, noEncrypt ? (ObjID?)null : objID, true);
+                w.WriteNewLine();
+                w.WriteString("endobj");
+                w.WriteNewLine();
+            }
+        }
+
+        internal PdfObject GetPageObj(PdfDict page, string key)
         {
             var _page = page;
             do
@@ -150,312 +424,6 @@ namespace SeaPeaYou.PeaPdf
                 _page = (PdfDict)_page["Parent"];
             } while (_page != null);
             return null;
-        }
-
-        internal byte[] Decrypt(byte[] bytes, PdfIndirectReference iRef)
-        {
-            if (encryptionKey == null || iRef == null)
-                return bytes;
-            var key = encryptionKey.ToList();
-            key.AddRange(BitConverter.GetBytes(iRef.ObjectNum).Take(3));
-            key.AddRange(BitConverter.GetBytes(iRef.GenerationNum).Take(2));
-            var md5 = MD5.Create();
-            var finalKey = md5.ComputeHash(key.ToArray()).Take(encryptionKey.Length + 5).ToArray();
-            return RC4.Decrypt(finalKey.ToArray(), bytes);
-        }
-
-        internal byte[] Encrypt(byte[] bytes, PdfIndirectReference iRef)
-        {
-            if (encryptionKey == null || iRef == null)
-                return bytes;
-            var key = encryptionKey.ToList();
-            key.AddRange(BitConverter.GetBytes(iRef.ObjectNum).Take(3));
-            key.AddRange(BitConverter.GetBytes(iRef.GenerationNum).Take(2));
-            var md5 = MD5.Create();
-            var finalKey = md5.ComputeHash(key.ToArray()).Take(encryptionKey.Length + 5).ToArray();
-            return RC4.Encrypt(finalKey.ToArray(), bytes);
-        }
-
-        internal PdfObject GetObj(PdfIndirectReference iRef)
-        {
-            if (!objDict.TryGetValue(iRef, out var res))
-            {
-                var entry = xRef.GetObjOffset(iRef);
-                if (entry != null)
-                {
-                    switch (entry.Type)
-                    {
-                        case XRefEntryType.Free: break;
-                        case XRefEntryType.InUse:
-                            {
-                                if (entry.GenNum != iRef.GenerationNum)
-                                    break;
-                                var fParse = new FParse(this, entry.Offset);
-                                fParse.SkipWhiteSpace();
-                                fParse.ReadObjHeader(iRef);
-                                res = fParse.ReadPdfObject(iRef);
-                                break;
-                            }
-                        case XRefEntryType.Compressed:
-                            {
-                                var objStm = GetObjectStream(entry.Offset);
-                                res = objStm.GetObj(entry.GenNum);
-                                break;
-                            }
-                    }
-                }
-
-                objDict.Add(iRef, res);
-            }
-            return res;
-        }
-
-        ObjectStream GetObjectStream(int objNum)
-        {
-            if (!objectStreamDict.TryGetValue(objNum, out var objStm))
-            {
-                var s = (PdfStream)GetObj(new PdfIndirectReference(objNum, 0));
-                objStm = new ObjectStream(this, s);
-                objectStreamDict.Add(objNum, objStm);
-            }
-            return objStm;
-        }
-
-        class ObjectStream
-        {
-            PDF pdf;
-            (int objNum, int offset)[] objOffsets;
-            byte[] bytes;
-            int first;
-
-            public ObjectStream(PDF pdf, PdfStream objStm)
-            {
-                this.pdf = pdf;
-                var n = (int)objStm.Dict["N"];
-                first = (int)objStm.Dict["First"];
-                objOffsets = new (int, int)[n];
-                bytes = objStm.GetBytes();
-                var fParse = new FParse(bytes);
-                for (int i = 0; i < n; i++)
-                {
-                    int objNum = (int)new PdfNumeric(fParse);
-                    fParse.SkipWhiteSpace();
-                    int offset = (int)new PdfNumeric(fParse);
-                    fParse.SkipWhiteSpace();
-                    objOffsets[i] = (objNum, offset);
-                }
-            }
-
-            public PdfObject GetObj(int index)
-            {
-                var fParse = new FParse(bytes, pdf, first + objOffsets[index].offset);
-                return fParse.ReadPdfObject(null);
-            }
-        }
-
-        static byte[] paddingBytes = new byte[] { 0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A };
-
-        class XRef
-        {
-            public readonly PdfDict TrailerDict;
-
-            readonly List<Section> sections;
-            readonly XRef prevXref;
-            List<(int objNum, int count)> streamSections;
-            List<XRefEntry> streamEntries;
-
-            public XRef(FParse fParse)
-            {
-                if (!fParse.ReadString("xref"))
-                {
-                    var iRef = fParse.ReadObjHeader(null);
-                    TrailerDict = new PdfDict(fParse, iRef);
-                    streamSections = new List<(int objNum, int count)>();
-                    var indexObj = (PdfArray)TrailerDict["Index"];
-                    if (indexObj != null)
-                    {
-                        for (int i = 0; i < indexObj.Length; i += 2)
-                        {
-                            streamSections.Add(((int)indexObj[i], (int)indexObj[i + 1]));
-                        }
-                    }
-                    else
-                    {
-                        streamSections.Add((0, (int)TrailerDict["Size"]));
-                    }
-                    var streamWidths = TrailerDict["W"].As<PdfArray>().Select(x => (int)x).ToArray();
-                    fParse.SkipWhiteSpace();
-                    var bytes = new PdfStream(TrailerDict, fParse, null/*xref is not encrypted*/).GetBytes();
-                    var byteReader = new ByteReader(bytes);
-                    var totalEntries = streamSections.Sum(x => x.count);
-                    streamEntries = new List<XRefEntry>();
-                    for (int i = 0; i < totalEntries; i++)
-                    {
-                        var nums = streamWidths.Select(x => byteReader.ReadBytes(x)).ToList();
-                        var entry = new XRefEntry((XRefEntryType)nums[0], nums[1], nums[2]);
-                        streamEntries.Add(entry);
-                    }
-                }
-                else
-                {
-                    sections = new List<Section>();
-                    while (true)
-                    {
-                        fParse.SkipWhiteSpace();
-                        var twoNums = TwoNums.TryRead(fParse, null);
-                        if (twoNums == null)
-                            break;
-                        fParse.SkipWhiteSpace();
-                        var section = new Section(twoNums.Num1, twoNums.Num2, fParse);
-                        sections.Add(section);
-                    }
-
-                    if (TrailerDict == null)
-                    {
-                        if (!fParse.ReadString("trailer"))
-                            throw new FormatException();
-                        fParse.SkipWhiteSpace();
-                        TrailerDict = new PdfDict(fParse, null);
-                    }
-                }
-
-                PdfObject prevIX = TrailerDict["Prev"];
-                if (prevIX != null)
-                {
-                    prevXref = new XRef(fParse.Clone((int)prevIX));
-                }
-                else
-                {
-                    if (sections != null && sections[0].StartNum > 0) //sometimes StartNum is wrongly > 0
-                    {
-                        sections[0].StartNum = 0;
-                        sections[0].EndNum = sections[0].StartNum + sections[0].Count;
-                    }
-                }
-            }
-
-            //public XRef(List<XRefSection> sections)
-            //{
-            //    Sections = sections;
-            //}
-
-            public void Write(Stream stream)
-            {
-                stream.WriteString("xref\n");
-                foreach (var sect in sections.OrderBy(x => x.StartNum))
-                {
-                    sect.Write(stream);
-                }
-            }
-
-            public XRefEntry GetObjOffset(PdfIndirectReference pdfRef)
-            {
-                if (sections != null)
-                {
-                    foreach (var section in sections)
-                    {
-                        if (section.ContainsObjNum(pdfRef.ObjectNum))
-                        {
-                            var entry = section.GetEntry(pdfRef.ObjectNum);
-                            return entry;
-                        }
-                    }
-                }
-                else
-                {
-                    var cSoFar = 0;
-                    foreach (var section in streamSections)
-                    {
-                        if (pdfRef.ObjectNum >= section.objNum && pdfRef.ObjectNum < (section.objNum + section.count))
-                        {
-                            var entry = streamEntries[cSoFar + (pdfRef.ObjectNum - section.objNum)];
-                            return entry;
-                        }
-                        cSoFar += section.count;
-                    }
-                }
-                if (prevXref != null)
-                    return prevXref.GetObjOffset(pdfRef);
-                return null;
-            }
-
-            class Section
-            {
-                public int StartNum, EndNum, Count;
-
-                byte[] bytes;
-
-                public Section(int startNum, int count, FParse fParse)
-                {
-                    StartNum = startNum;
-                    Count = count;
-                    EndNum = StartNum + Count;
-                    bytes = fParse.ReadByteArray(20 * count);
-                }
-
-                public Section(int startNum, int count, IEnumerable<(int offset, int genNum)> lines)
-                {
-                    StartNum = startNum;
-                    Count = count;
-                    EndNum = StartNum + count;
-                    var ms = new MemoryStream();
-                    foreach (var line in lines)
-                    {
-                        ms.WriteString(line.offset.ToString("d10"));
-                        ms.WriteByte((byte)' ');
-                        ms.WriteString(line.genNum.ToString("d5"));
-                        ms.WriteByte((byte)' ');
-                        ms.WriteByte((byte)'n');
-                        ms.WriteByte((byte)' ');
-                        ms.WriteByte((byte)'\n');
-                    }
-                    bytes = ms.ToArray();
-                }
-
-                public XRefEntry GetEntry(int objNum)
-                {
-                    var byteIX = (objNum - StartNum) * 20;
-                    var entry = new XRefEntry(
-                        GetString(byteIX + 17, 1) == "n" ? XRefEntryType.InUse : XRefEntryType.Free,
-                        int.Parse(GetString(byteIX, 10)),
-                        int.Parse(GetString(byteIX + 11, 5))
-                    );
-                    return entry;
-                }
-
-                public bool ContainsObjNum(int objNum) => objNum >= StartNum && objNum < EndNum;
-
-                public string GetString(int byteIX, int count)
-                {
-                    var sb = new StringBuilder();
-                    for (var i = 0; i < count; i++)
-                        sb.Append((char)bytes[byteIX + i]);
-                    return sb.ToString();
-                }
-
-                public void Write(Stream stream)
-                {
-                    var twoNums = new TwoNums(StartNum, Count, null);
-                    twoNums.Write(stream, false);
-                    stream.Write(bytes);
-                }
-            }
-
-        }
-
-        enum XRefEntryType { Free, InUse, Compressed }
-
-        class XRefEntry
-        {
-            public readonly int Offset, GenNum;
-            public readonly XRefEntryType Type;
-
-            public XRefEntry(XRefEntryType type, int offset, int genNum)
-            {
-                Type = type;
-                Offset = offset;
-                GenNum = genNum;
-            }
         }
 
     }

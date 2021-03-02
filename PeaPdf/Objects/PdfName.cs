@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -11,40 +11,41 @@ using System.IO;
 
 namespace SeaPeaYou.PeaPdf
 {
+    //immutable
     class PdfName : PdfObject, IEquatable<PdfName>
     {
 
-        public readonly byte[] Value;
+        public readonly IReadOnlyCollection<byte> Value;
+        public readonly string String;
 
-        public PdfName(FParse fParse)
+        internal PdfName(PdfReader r)
         {
-            if (fParse.ReadByte() != '/')
+            if (r.ReadByte() != '/')
                 throw new FormatException();
             var byteList = new List<byte>();
-            while (!fParse.AtEnd && !Utils.IsDelimiter(fParse.PeekByte))
+            while (!r.AtEnd && !Utils.IsDelimiter(r.PeekByte))
             {
-                var b = fParse.ReadByte();
+                var b = r.ReadByte();
                 if (b == '#')
                 {
-                    byte byte1 = fParse.ReadByte(), byte2 = fParse.ReadByte();
+                    byte byte1 = r.ReadByte(), byte2 = r.ReadByte();
                     byteList.Add((byte)(Utils.ReadHexDigit(byte1) * 16 + Utils.ReadHexDigit(byte2)));
                     continue;
                 }
                 byteList.Add(b);
             }
-            Value = byteList.ToArray();
+            var bytes = byteList.ToArray();
+            Value = bytes;
+            String = Encoding.UTF8.GetString(bytes);
         }
 
         public PdfName(string str)
         {
-            Value = str.Select(x => (byte)x).ToArray();
+            Value = Encoding.UTF8.GetBytes(str);
+            String = str;
         }
 
-        public override bool Equals(object obj)
-        {
-            var other = obj as PdfName;
-            return Equals(other);
-        }
+        public override bool Equals(object obj) => Equals(obj as PdfName);
 
         public bool Equals(PdfName other)
         {
@@ -61,31 +62,31 @@ namespace SeaPeaYou.PeaPdf
             return hash;
         }
 
-        public override string ToString()
-        {
-            return new string(Value.Select(x => (char)x).ToArray());
-        }
+        public override string ToString() => String;
 
-        public override void Write(Stream stream, PDF pdf, PdfIndirectReference iRef)
+        internal void WriteThis(PdfWriter w)  
         {
-            stream.WriteByte((byte)'/');
+            w.WriteByte('/');
             foreach (var b in Value)
             {
                 var escape = Utils.IsDelimiter(b) || b == '#' || b < 33 || b > 126;
                 if (escape)
                 {
-                    stream.WriteByte((byte)'#');
-                    stream.WriteHex(b);
+                    w.WriteByte('#');
+                    w.WriteHex(b);
                 }
                 else
                 {
-                    stream.WriteByte(b);
+                    w.WriteByte(b);
                 }
             }
-            stream.WriteByte((byte)' ');
+            w.NeedsDeliminator = true;
         }
+        internal override void Write(PdfWriter w, ObjID? encryptionObjID) => WriteThis(w);
 
-        public static implicit operator PdfName(string name) => new PdfName(name);
+        public override PdfObject Clone() => this; //being immutable
+
+        public static explicit operator PdfName(string name) => name == null ? null : new PdfName(name);
         //don't use == or != - too complex
     }
 }

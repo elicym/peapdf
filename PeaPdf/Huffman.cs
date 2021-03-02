@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -115,8 +115,8 @@ namespace SeaPeaYou.PeaPdf
             throw new Exception("code not found");
         }
 
-        Dictionary<HuffmanBitCode, T> dict = new Dictionary<HuffmanBitCode, T>();
-        HuffmanBitCode bitCode = new HuffmanBitCode();
+        readonly Dictionary<HuffmanBitCode, T> dict = new Dictionary<HuffmanBitCode, T>();
+        readonly HuffmanBitCode bitCode = new HuffmanBitCode();
 
     }
 }

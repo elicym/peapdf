@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -44,7 +44,7 @@ namespace SeaPeaYou.PeaPdf.Filters
                         newEntry = null;
                         break;
                     case EntryType.EOD:
-                        result = DoPredictor(decodedBytes.ToArray());
+                        result = DecodePredictor(decodedBytes.ToArray());
                         return;
                     case EntryType.Data:
                         {

@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -22,20 +22,25 @@ namespace SeaPeaYou.PeaPdf
 
         public override string ToString() => Value.ToString();
 
-        public static PdfBool TryRead(FParse fParse)
+        public static PdfBool TryRead(PdfReader r)
         {
-            if (fParse.ReadString("true"))
+            if (r.ReadString("true"))
                 return new PdfBool(true);
-            if (fParse.ReadString("false"))
+            if (r.ReadString("false"))
                 return new PdfBool(false);
             return null;
         }
 
-        public override void Write(Stream stream, PDF pdf, PdfIndirectReference iRef)
+        internal override void Write(PdfWriter w, ObjID? encryptionObjID)
         {
-            stream.WriteString(Value ? "true" : "false");
-            stream.WriteByte((byte)' ');
+            w.EnsureDeliminated();
+            w.WriteString(Value ? "true" : "false");
+            w.NeedsDeliminator = true;
         }
+
+        public override PdfObject Clone() => new PdfBool(Value);
+
+        public static explicit operator PdfBool(bool? b) => b == null ? null : new PdfBool(b.Value);
 
     }
 }

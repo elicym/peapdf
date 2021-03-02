@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -13,51 +13,63 @@ namespace SeaPeaYou.PeaPdf
 {
     class PdfArray : PdfObject, IEnumerable<PdfObject>
     {
+        readonly List<PdfObject> items = new List<PdfObject>();
 
-        public PdfObject this[int ix] => values[ix];
-        public int Length => values.Length;
+        public PdfObject this[int ix] => items[ix];
+        public int Count => items.Count;
 
-        public PdfArray(FParse fParse, PdfIndirectReference iRef)
+        public PdfArray(PdfReader r, ObjID? baseObjID)
         {
-            if (fParse.ReadByte() != '[')
+            if (r.ReadByte() != '[')
                 throw new FormatException();
-            var values = new List<PdfObject>();
-            fParse.SkipWhiteSpace();
+            r.SkipWhiteSpace();
             while (true)
             {
-                if (fParse.PeekByte == ']')
+                if (r.PeekByte == ']')
                 {
-                    fParse.Pos++;
-                    this.values = values.ToArray();
+                    r.Pos++;
                     return;
                 }
-                var obj = fParse.Deref(fParse.ReadPdfObject(iRef)); //generally if you have an array, you read all objects, so we deref straight away
-                if (obj is PdfIndirectReference ir && ir.ObjectNum == 660)
-                    System.Diagnostics.Debugger.Break();
-                values.Add(obj);
-                fParse.SkipWhiteSpace();
+                var obj = r.ReadPdfObject(baseObjID);
+                items.Add(r.Deref(obj)); //generally if you have an array, you read all objects, so we deref straight away
+                r.SkipWhiteSpace();
             }
         }
 
-        public PdfArray(PdfObject[] objs)
+        public PdfArray(params PdfObject[] objs)
         {
-            values = objs;
+            items.AddRange(objs);
         }
 
-        public override void Write(Stream stream, PDF pdf, PdfIndirectReference iRef)
+        internal override void Write(PdfWriter w, ObjID? encryptionObjID)
         {
-            stream.WriteByte((byte)'[');
-            foreach (var obj in values)
+            w.WriteByte('[');
+            w.NeedsDeliminator = false;
+            foreach (var obj in items)
             {
-                obj.Write(stream, pdf, iRef);
+                w.WriteObj(obj, encryptionObjID, false);
             }
-            stream.WriteByte((byte)']');
+            w.WriteByte(']');
+            w.NeedsDeliminator = false;
         }
 
-        public IEnumerator<PdfObject> GetEnumerator() => ((IEnumerable<PdfObject>)values).GetEnumerator();
+        public override PdfObject Clone()
+        {
+            var newObjs = new PdfObject[items.Count];
+            for (int i = 0; i < items.Count; i++)
+            {
+                newObjs[i] = PdfObject.Clone(items[i]);
+            }
+            return new PdfArray(newObjs);
+        }
+
+        public void Add(PdfObject obj) => items.Add(obj);
+        public bool Remove(PdfObject obj) => items.Remove(obj);
+        public void Clear() => items.Clear();
+
+        public IEnumerator<PdfObject> GetEnumerator() => items.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-        PdfObject[] values;
     }
 }

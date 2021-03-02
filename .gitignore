@@ -7,3 +7,11 @@ obj/
 *.user
 *.pubxml
 gi-*
+*.filters
+
+#specific folders
+/PeaPdf/Native/
+/NativeTest/
+/x64/
+/packages/
+/Debug/

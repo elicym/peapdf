@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -31,6 +31,16 @@ namespace SeaPeaYou.PeaPdf.Filters
                 res.Add((byte)(Utils.ReadHexDigit(prev.Value) * 16 + Utils.ReadHexDigit(b)));
             }
             return res.ToArray();
+        }
+
+        public static byte[] Encode(byte[] bytes)
+        {
+            var w = new ByteWriter();
+            foreach (var b in bytes)
+            {
+                Utils.WriteHex(w, b);
+            }
+            return w.ToArray();
         }
     }
 }

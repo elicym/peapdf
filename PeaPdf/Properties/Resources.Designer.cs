@@ -63,9 +63,9 @@ namespace SeaPeaYou.PeaPdf.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>
-        internal static byte[] devicelink {
+        internal static byte[] USWebUncoated {
             get {
-                object obj = ResourceManager.GetObject("devicelink", resourceCulture);
+                object obj = ResourceManager.GetObject("USWebUncoated", resourceCulture);
                 return ((byte[])(obj));
             }
         }

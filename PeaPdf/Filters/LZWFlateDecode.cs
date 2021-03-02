@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -23,7 +23,7 @@ namespace SeaPeaYou.PeaPdf.Filters
             columns = (int?)decodeParms?["Columns"] ?? 1;
         }
 
-        public byte[] DoPredictor(byte[] bytes)
+        public byte[] DecodePredictor(byte[] bytes)
         {
             if (predictor >= 10)
             {
@@ -72,6 +72,60 @@ namespace SeaPeaYou.PeaPdf.Filters
                     }
                 } while (bytesIX < bytes.Length);
                 bytes = predicted.ToArray();
+            }
+            return bytes;
+        }
+
+        public byte[] EncodePredictor(byte[] bytes)
+        {
+            if (predictor >= 10)
+            {
+                columns *= colors;
+
+                var encoded = new List<byte>(bytes.Length);
+                var algorithm = (byte)(predictor - 10);
+                int bytesIX = 0;
+                do
+                {
+                    encoded.Add(algorithm);
+                    for (int c = 0; c < columns && bytesIX < bytes.Length; c++)
+                    {
+                        var b = bytes[bytesIX];
+                        switch (algorithm)
+                        {
+                            case 0: break;
+                            case 1:
+                                if (c < colors)
+                                    break;
+                                b -= bytes[bytesIX - colors];
+                                break;
+                            case 2:
+                                if (bytesIX < columns)
+                                    break;
+                                b -= bytes[bytesIX - columns];
+                                break;
+                            case 3:
+                                {
+                                    byte left = c < colors ? (byte)0 : bytes[bytesIX - colors],
+                                        up = bytesIX < columns ? (byte)0 : bytes[bytesIX - columns];
+                                    b -= (byte)((left + up) >> 1);
+                                    break;
+                                }
+                            case 4:
+                                {
+                                    byte left = c < colors ? (byte)0 : bytes[bytesIX - colors],
+                                        up = bytesIX < columns ? (byte)0 : bytes[bytesIX - columns],
+                                        upLeft = (bytesIX < columns || c < colors) ? (byte)0 : bytes[bytesIX - columns - colors];
+                                    b -= PaethPredictor(left, up, upLeft);
+                                    break;
+                                }
+                            default: throw new NotImplementedException("algorithm");
+                        }
+                        encoded.Add(b);
+                        bytesIX++;
+                    }
+                } while (bytesIX < bytes.Length);
+                bytes = encoded.ToArray();
             }
             return bytes;
         }

@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,93 +17,92 @@ namespace SeaPeaYou.PeaPdf
         class DrawContext
         {
 
-            public DrawContext(Renderer renderer, byte[] bytes, PdfDict resources)
+            public DrawContext(Renderer renderer, W.ContentStream cs)
             {
                 this.renderer = renderer;
-                this.resources = resources;
+                this.resources = cs.Resources;
                 //File.WriteAllBytes(@"d:\tmp\content-latest-inner.txt", bytes);
 
-                fParse = new FParse(bytes);
+                //var cs=new CS.ContentStream()
 
-                while (true)
+                foreach (var instruction in cs.Instructions)
                 {
-                    fParse.SkipWhiteSpace();
-                    if (fParse.AtEnd)
-                        break;
-                    var b = fParse.PeekByte;
-                    if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '\'' || b == '"')
-                    {
-                        //if (++loopC > 5290)
-                        //    goto after;
-                        var keyword = fParse.ReadStringUntilDelimiter();
-                        DoKeyword(keyword);
-                        operands.Clear();
-                        //if (++keywordIX == 5)
-                        //    break;
-                        //Debug.WriteLine($"{sw.ElapsedMilliseconds} {keyword}");
-                        //sw.Restart();
-                    }
-                    else
-                    {
-                        operands.Add(fParse.ReadPdfObject(null));
-                    }
+                    DoKeyword(instruction);
                 }
+
+                //r = new PdfReader(bytes);
+
+                //while (true)
+                //{
+                //    r.SkipWhiteSpace();
+                //    if (r.AtEnd)
+                //        break;
+                //    var b = r.PeekByte;
+                //    if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '\'' || b == '"')
+                //    {
+                //        var keyword = r.ReadStringUntilDelimiter();
+                //        DoKeyword(keyword);
+                //        operands.Clear();
+                //    }
+                //    else
+                //    {
+                //        operands.Add(r.ReadPdfObject(null));
+                //    }
+                //}
             }
 
-            Renderer renderer;
-            List<PdfObject> operands = new List<PdfObject>();
-            PdfDict resources;
+            readonly Renderer renderer;
+            readonly W.ResourceDictionary resources;
             SKPath curPath = new SKPath();
-            FParse fParse;
 
-            void DoKeyword(string keyword)
+            void DoKeyword(CS.Instruction keyword)
             {
                 switch (keyword)
                 {
+
                     //graphics state
-                    case "q":
+                    case CS.q inst:
                         renderer.graphicsStateStack.Push(renderer.gs.Clone());
                         renderer.canvas.Save();
                         break;
-                    case "Q":
+                    case CS.Q inst:
                         if (renderer.graphicsStateStack.Count > 0)
                         {
                             renderer.gs = renderer.graphicsStateStack.Pop();
                             renderer.canvas.Restore();
                         }
                         break;
-                    case "gs":
+                    case CS.gs inst:
                         {
-                            var extGState = (PdfDict)resources["ExtGState"];
-                            var prms = (PdfDict)extGState[(PdfName)operands[0]];
-                            foreach (var prm in prms)
+                            var prms = (PdfDict)resources.ExtGState[inst.dictName];
+                            foreach (var (key, value) in prms)
                             {
-                                switch (prm.key)
+                                switch (key)
                                 {
                                     case "LW":
-                                        renderer.gs.StrokePaint.StrokeWidth = (float)prm.value;
+                                        renderer.gs.StrokePaint.StrokeWidth = (float)value;
                                         break;
                                     case "LC":
-                                        renderer.gs.StrokePaint.StrokeCap = (SKStrokeCap)(int)prm.value;
+                                        renderer.gs.StrokePaint.StrokeCap = (SKStrokeCap)(int)value;
                                         break;
                                     case "LJ":
-                                        renderer.gs.StrokePaint.StrokeJoin = (SKStrokeJoin)(int)prm.value;
+                                        renderer.gs.StrokePaint.StrokeJoin = (SKStrokeJoin)(int)value;
                                         break;
                                     case "ML":
-                                        renderer.gs.StrokePaint.StrokeMiter = (float)prm.value;
+                                        renderer.gs.StrokePaint.StrokeMiter = (float)value;
                                         break;
                                     case "D":
                                         {
-                                            var arr = (PdfArray)prm.value;
+                                            var arr = (PdfArray)value;
                                             var dashArray = (PdfArray)arr[0];
                                             renderer.gs.StrokePaint.PathEffect = SKPathEffect.CreateDash(dashArray.Select(x => (float)x).ToArray(), (float)arr[1]);
                                             break;
                                         }
                                     case "CA":
-                                        renderer.gs.StrokePaint.ColorFilter = SKColorFilter.CreateBlendMode(SKColors.White.WithAlpha((byte)((float)prm.value * 255)), SKBlendMode.DstIn);
+                                        renderer.gs.StrokePaint.ColorFilter = SKColorFilter.CreateBlendMode(SKColors.White.WithAlpha((byte)((float)value * 255)), SKBlendMode.DstIn);
                                         break;
                                     case "ca":
-                                        renderer.gs.OtherPaint.ColorFilter = SKColorFilter.CreateBlendMode(SKColors.White.WithAlpha((byte)((float)prm.value * 255)), SKBlendMode.DstIn);
+                                        renderer.gs.OtherPaint.ColorFilter = SKColorFilter.CreateBlendMode(SKColors.White.WithAlpha((byte)((float)value * 255)), SKBlendMode.DstIn);
                                         break;
                                     case "RI":
                                     case "OP":
@@ -123,413 +122,182 @@ namespace SeaPeaYou.PeaPdf
                                     case "AIS":
                                     case "TK":
                                         break;
-
                                 }
                             }
                             break;
                         }
-                    case "M":
-                        renderer.gs.StrokePaint.StrokeMiter = (float)operands[0];
+                    case CS.M inst:
+                        renderer.gs.StrokePaint.StrokeMiter = inst.miterLimit;
                         break;
-                    case "cm":
-                        renderer.canvas.SetMatrix(Utils.MatrixConcat(renderer.canvas.TotalMatrix, MatrixFromOperands()));
+                    case CS.cm inst:
+                        renderer.canvas.SetMatrix(Utils.MatrixConcat(renderer.canvas.TotalMatrix, inst.Matrix));
                         break;
-                    case "w":
-                        renderer.gs.StrokePaint.StrokeWidth = (float)operands[0];
+                    case CS.w inst:
+                        renderer.gs.StrokePaint.StrokeWidth = inst.lineWidth;
                         break;
-                    case "J":
-                        renderer.gs.StrokePaint.StrokeJoin = (SKStrokeJoin)(int)operands[0];
+                    case CS.J inst:
+                        renderer.gs.StrokePaint.StrokeCap = inst.lineCap;
                         break;
-                    case "j":
-                        renderer.gs.StrokePaint.StrokeCap = (SKStrokeCap)(int)operands[0];
+                    case CS.j inst:
+                        renderer.gs.StrokePaint.StrokeJoin = inst.lineJoin;
                         break;
-                    case "d":
+                    case CS.d inst:
                         {
-                            var dashArray = operands[0].As<PdfArray>().Select(x => (float)x).ToArray();
-                            var dashPhase = (float)operands[1];
-                            renderer.gs.StrokePaint.PathEffect = SKPathEffect.CreateDash(dashArray, dashPhase);
+                            renderer.gs.StrokePaint.PathEffect = SKPathEffect.CreateDash(inst.dashArray, inst.dashPhase);
                             break;
                         }
-                    case "i":
+                    case CS.i inst:
                         break;
                     //clipping paths
-                    case "W":
+                    case CS.W inst:
                         curPath.FillType = SKPathFillType.Winding;
                         renderer.canvas.ClipPath(curPath);
                         break;
-                    case "W*":
+                    case CS.W_ inst:
                         curPath.FillType = SKPathFillType.EvenOdd;
                         renderer.canvas.ClipPath(curPath);
                         break;
                     //path construction
-                    case "re":
+                    case CS.re inst:
                         {
-                            var nums = operands.Select(o => (float)o).ToList();
-                            float x = nums[0], y = nums[1], width = nums[2], height = nums[3];
-                            curPath.AddRect(new SKRect(x, y + height, x + width, y));
+                            curPath.AddRect(new SKRect(inst.x, inst.y + inst.height, inst.x + inst.width, inst.y));
                             break;
                         }
-                    case "m":
-                        curPath.MoveTo((float)operands[0], (float)operands[1]);
+                    case CS.m inst:
+                        curPath.MoveTo(inst.x, inst.y);
                         break;
-                    case "l":
-                        curPath.LineTo((float)operands[0], (float)operands[1]);
+                    case CS.l inst:
+                        curPath.LineTo(inst.x, inst.y);
                         break;
-                    case "c":
+                    case CS.c inst:
                         {
-                            var nums = operands.Select(x => (float)x).ToList();
-                            curPath.CubicTo(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]);
+                            curPath.CubicTo(inst.x1, inst.y1, inst.x2, inst.y2, inst.x3, inst.y3);
                             break;
                         }
-                    case "v":
+                    case CS.v inst:
                         {
-                            var nums = operands.Select(x => (float)x).ToList();
-                            curPath.CubicTo(curPath.LastPoint.X, curPath.LastPoint.Y, nums[0], nums[1], nums[2], nums[3]);
+                            curPath.CubicTo(curPath.LastPoint.X, curPath.LastPoint.Y, inst.x2, inst.y2, inst.x3, inst.y3);
                             break;
                         }
-                    case "y":
+                    case CS.y inst:
                         {
-                            var nums = operands.Select(x => (float)x).ToList();
-                            curPath.CubicTo(nums[0], nums[1], nums[2], nums[3], nums[2], nums[3]);
+                            curPath.CubicTo(inst.x1, inst.y1, inst.x3, inst.y3, inst.x3, inst.y3);
                             break;
                         }
-                    case "h":
+                    case CS.h inst:
                         curPath.Close();
                         break;
                     //path painting
-                    case "n":
+                    case CS.n inst:
                         EndPath();
                         break;
-                    case "S":
+                    case CS.s inst:
+                        curPath.Close();
                         renderer.canvas.DrawPath(curPath, renderer.gs.StrokePaint);
                         EndPath();
                         break;
-                    case "f":
-                    case "F":
+                    case CS.S inst:
+                        renderer.canvas.DrawPath(curPath, renderer.gs.StrokePaint);
+                        EndPath();
+                        break;
+                    case CS.f inst_f:
+                    case CS.F inst_F:
                         curPath.FillType = SKPathFillType.Winding;
                         renderer.canvas.DrawPath(curPath, renderer.gs.OtherPaint);
                         EndPath();
                         break;
-                    case "f*":
+                    case CS.f_ inst:
                         curPath.FillType = SKPathFillType.EvenOdd;
                         renderer.canvas.DrawPath(curPath, renderer.gs.OtherPaint);
                         EndPath();
                         break;
-                    case "B":
+                    case CS.B inst:
                         curPath.FillType = SKPathFillType.Winding;
                         renderer.canvas.DrawPath(curPath, renderer.gs.OtherPaint);
                         renderer.canvas.DrawPath(curPath, renderer.gs.StrokePaint);
                         EndPath();
                         break;
-                    case "B*":
+                    case CS.B_ inst:
                         curPath.FillType = SKPathFillType.EvenOdd;
                         renderer.canvas.DrawPath(curPath, renderer.gs.OtherPaint);
                         renderer.canvas.DrawPath(curPath, renderer.gs.StrokePaint);
                         EndPath();
                         break;
                     //color
-                    case "CS":
-                        renderer.gs.StrokeColorSpace = renderer.GetColorSpace((PdfName)operands[0]);
+                    case CS.CS inst:
+                        renderer.gs.StrokeColorSpace = renderer.GetColorSpace(inst.name);
                         renderer.gs.StrokePaint.Color = SKColors.Black;
                         break;
-                    case "cs":
-                        renderer.gs.OtherColorSpace = renderer.GetColorSpace((PdfName)operands[0]);
+                    case CS.cs inst:
+                        renderer.gs.OtherColorSpace = renderer.GetColorSpace(inst.name);
                         renderer.gs.OtherPaint.Color = SKColors.Black;
                         break;
-                    case "SC":
-                    case "SCN":
-                        switch (renderer.gs.StrokeColorSpace)
+                    case CS.ColorFamily inst:
                         {
-                            case ColorSpace.DeviceRGB:
-                                renderer.gs.StrokePaint.Color = RGBFromOperands();
-                                break;
-                            case ColorSpace.DeviceGray:
-                                renderer.gs.StrokePaint.Color = GrayFromOperands();
-                                break;
-                            case ColorSpace.DeviceCMYK:
-                                renderer.gs.StrokePaint.Color = CMYKFromOperands();
-                                break;
-                            case ColorSpace.Blank:
-                                renderer.gs.StrokePaint.Color = SKColors.Transparent;
-                                break;
+                            var colorSpace = inst.ColorSpace ?? (inst.IsStroke ? renderer.gs.StrokeColorSpace : renderer.gs.OtherColorSpace);
+                            SKColor color = default;
+                            switch (colorSpace)
+                            {
+                                case ColorSpace.DeviceRGB: color = RGBFromOperands(inst.GetOperands()); break;
+                                case ColorSpace.DeviceGray: color = GrayFromOperands(inst.GetOperands()); break;
+                                case ColorSpace.DeviceCMYK: color = CMYKFromOperands(inst.GetOperands()); break;
+                                case ColorSpace.Blank: color = SKColors.Transparent; break;
+                            }
+                            var paint = inst.IsStroke ? renderer.gs.StrokePaint : renderer.gs.OtherPaint;
+                            paint.Color = color;
+                            break;
                         }
-                        break;
-                    case "sc":
-                    case "scn":
-                        switch (renderer.gs.OtherColorSpace)
-                        {
-                            case ColorSpace.DeviceRGB:
-                                renderer.gs.OtherPaint.Color = RGBFromOperands();
-                                break;
-                            case ColorSpace.DeviceGray:
-                                renderer.gs.OtherPaint.Color = GrayFromOperands();
-                                break;
-                            case ColorSpace.DeviceCMYK:
-                                renderer.gs.OtherPaint.Color = CMYKFromOperands();
-                                break;
-                            case ColorSpace.Blank:
-                                renderer.gs.OtherPaint.Color = SKColors.Transparent;
-                                break;
-                        }
-                        break;
-                    case "K":
-                        renderer.gs.StrokeColorSpace = ColorSpace.DeviceCMYK;
-                        renderer.gs.StrokePaint.Color = CMYKFromOperands();
-                        break;
-                    case "k":
-                        renderer.gs.OtherColorSpace = ColorSpace.DeviceCMYK;
-                        renderer.gs.OtherPaint.Color = CMYKFromOperands();
-                        break;
-                    case "G":
-                        renderer.gs.StrokeColorSpace = ColorSpace.DeviceGray;
-                        renderer.gs.StrokePaint.Color = GrayFromOperands();
-                        break;
-                    case "g":
-                        renderer.gs.OtherColorSpace = ColorSpace.DeviceGray;
-                        renderer.gs.OtherPaint.Color = GrayFromOperands();
-                        break;
-                    case "RG":
-                        renderer.gs.StrokeColorSpace = ColorSpace.DeviceRGB;
-                        renderer.gs.StrokePaint.Color = RGBFromOperands();
-                        break;
-                    case "rg":
-                        renderer.gs.OtherColorSpace = ColorSpace.DeviceRGB;
-                        renderer.gs.OtherPaint.Color = RGBFromOperands();
-                        break;
                     //marked content
-                    case "BDC":
-                    case "EMC":
+                    case CS.BDC inst:
+                        break;
+                    case CS.EMC inst:
                         break;
                     //text
-                    case "BT":
+                    case CS.BT inst:
                         {
                             renderer.canvas.Save();
                             renderer.textBaseMatrix = renderer.canvas.TotalMatrix;
-                            renderer.textMatrix = renderer.textLineMatrix = SKMatrix.MakeIdentity();
+                            renderer.textMatrix = renderer.textLineMatrix = SKMatrix.CreateIdentity();
                             break;
                         }
-                    case "ET":
+                    case CS.ET inst:
                         renderer.canvas.Restore();
                         break;
-                    case "Tf":
+                    case CS.Tf inst:
                         {
-                            renderer.gs.TextTfs = (float)operands[1];
+                            renderer.gs.TextTfs = inst.size;
                             SetTextStateMatrix();
 
-                            var fontName = (PdfName)operands[0];
-                            if (!renderer.fontDict.TryGetValue(fontName, out renderer.gs.TextFont))
+                            if (!renderer.fontDict.TryGetValue(inst.font, out renderer.gs.TextFont))
                             {
-                                renderer.fontDict.Add(fontName, renderer.gs.TextFont = new Font { FontName = fontName });
-                                renderer.gs.TextFont.Encoding = CharEncoding.StdEncoding;
-
-                                var fontObj = resources["Font"].As<PdfDict>()[fontName].As<PdfDict>();
-                                var subtype = fontObj["Subtype"].ToString();
-                                var _fontObj = subtype == "Type0" ? fontObj["DescendantFonts"].As<PdfArray>()[0].As<PdfDict>() : fontObj;
-
-                                var encodingObj = fontObj["Encoding"];
-                                if (encodingObj != null)
-                                {
-                                    if (encodingObj is PdfName encodingName)
-                                    {
-                                        renderer.gs.TextFont.Encoding = CharEncoding.FromName(encodingName.ToString());
-                                    }
-                                    else if (encodingObj is PdfDict encodingDict)
-                                    {
-                                        var baseEncoding = (PdfName)encodingDict["BaseEncoding"];
-                                        if (baseEncoding != null)
-                                            renderer.gs.TextFont.Encoding = CharEncoding.FromName(baseEncoding.ToString());
-                                        var differences = (PdfArray)encodingDict["Differences"];
-                                        if (differences != null)
-                                        {
-                                            renderer.gs.TextFont.Code2Names = new Dictionary<byte, PdfName>();
-                                            int code = 0;
-                                            foreach (var item in differences)
-                                            {
-                                                if (item is PdfNumeric)
-                                                    code = (int)item;
-                                                else
-                                                {
-                                                    renderer.gs.TextFont.Code2Names.Add((byte)code, (PdfName)item);
-                                                    code++;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                var widthsObj = (PdfArray)fontObj["Widths"];
-                                if (widthsObj != null)
-                                {
-                                    var divisor = subtype == "Type3" ? 1 : 1000;
-                                    renderer.gs.TextFont.Widths = widthsObj.Select(x => (float)x / divisor).ToList();
-                                }
-                                renderer.gs.TextFont.FirstChar = (int?)fontObj["FirstChar"];
-                                var fontDescriptor = _fontObj["FontDescriptor"]?.As<PdfDict>();
-
-                                if (subtype == "Type3")
-                                {
-                                    renderer.gs.TextFont.Type3Font = fontObj;
-                                }
-                                else if (renderer.gs.TextFont.Typeface == null)
-                                {
-                                    if (fontDescriptor != null)
-                                    {
-                                        OTFFont otfFont = null;
-                                        var fontFile = (PdfStream)fontDescriptor["FontFile2"];
-                                        if (fontFile != null)
-                                        {
-                                            var fontBytes = fontFile.GetBytes();
-                                            otfFont = OTFFont.FromTT(fontBytes);
-                                            if (subtype == "Type0")
-                                                otfFont.AddIdentityCMap();
-                                        }
-                                        else
-                                        {
-                                            fontFile = (PdfStream)fontDescriptor["FontFile3"];
-                                            if (fontFile != null)
-                                            {
-                                                var fontBytes = fontFile.GetBytes();
-                                                otfFont = OTFFont.FromCFF(fontBytes, renderer.gs.TextFont.Encoding, renderer.gs.TextFont.Code2Names);
-                                                renderer.gs.TextFont.Code2Names = null;
-                                                renderer.gs.TextFont.Encoding = null; //since we created the cmap
-                                            }
-                                        }
-                                        if (otfFont != null)
-                                        {
-
-                                            if (subtype == "Type0")
-                                            {
-                                                renderer.gs.TextFont.Encoding = null;
-                                                renderer.gs.TextFont.Type0 = true;
-                                                var cid2GIDObj = _fontObj["CIDToGIDMap"] as PdfStream;
-                                                if (cid2GIDObj != null)
-                                                {
-                                                    renderer.gs.TextFont.CIDToGID = cid2GIDObj.GetBytes();
-                                                }
-                                                else
-                                                {
-                                                    var cidSetObj = _fontObj["CIDSet"];
-                                                    if (cidSetObj != null)
-                                                    {
-                                                        renderer.gs.TextFont.CodeMap = new List<int>();
-                                                        var cidSetBytes = cidSetObj.As<PdfStream>().GetBytes();
-                                                        var bitStream = new BitReader(new ByteReader(cidSetBytes));
-                                                        for (int i = 0; i < cidSetBytes.Length * 8; i++)
-                                                        {
-                                                            if (bitStream.ReadBit())
-                                                                renderer.gs.TextFont.CodeMap.Add(i);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            else
-                                            {
-                                                if (otfFont.NoUnicodeCMap)
-                                                {
-                                                    renderer.gs.TextFont.Encoding = null;
-                                                }
-                                            }
-                                            MemoryStream ms = new MemoryStream();
-                                            otfFont.Write(ms);
-                                            ms.Seek(0, SeekOrigin.Begin);
-                                            renderer.gs.TextFont.Typeface = SKTypeface.FromStream(ms);
-                                        }
-                                    }
-
-                                }
-                                var baseFont = _fontObj["BaseFont"]?.ToString();
-                                if (renderer.gs.TextFont.Typeface == null)
-                                {
-                                    if (baseFont != null)
-                                    {
-                                        switch (baseFont)
-                                        {
-                                            case "Helvetica":
-                                                renderer.gs.TextFont.Typeface = getHelvetica(SKFontStyle.Normal);
-                                                break;
-                                            case "Helvetica-Bold":
-                                                renderer.gs.TextFont.Typeface = getHelvetica(SKFontStyle.Bold);
-                                                break;
-                                            case "Helvetica-Oblique":
-                                                renderer.gs.TextFont.Typeface = getHelvetica(SKFontStyle.Italic);
-                                                break;
-                                            case "Helvetica-BoldOblique":
-                                                renderer.gs.TextFont.Typeface = getHelvetica(SKFontStyle.BoldItalic);
-                                                break;
-                                            case "Times-Roman":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Times New Roman", SKFontStyle.Normal);
-                                                break;
-                                            case "Times-Bold":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Times New Roman", SKFontStyle.Bold);
-                                                break;
-                                            case "Times-Italic":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Times New Roman", SKFontStyle.Italic);
-                                                break;
-                                            case "Times-BoldItalic":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Times New Roman", SKFontStyle.BoldItalic);
-                                                break;
-                                            case "Courier":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Courier New", SKFontStyle.Normal);
-                                                break;
-                                            case "Courier-Bold":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Courier New", SKFontStyle.Bold);
-                                                break;
-                                            case "Courier-Oblique":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Courier New", SKFontStyle.Italic);
-                                                break;
-                                            case "Courier-BoldOblique":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Courier New", SKFontStyle.BoldItalic);
-                                                break;
-                                            case "Symbol":
-                                                renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName("Symbol");
-                                                renderer.gs.TextFont.Encoding = null;
-                                                break;
-                                        }
-                                        SKTypeface getHelvetica(SKFontStyle style)
-                                        {
-                                            var typeface = SKTypeface.FromFamilyName("Helvetica", style);
-                                            if (typeface.FamilyName != "Helvetica")
-                                                typeface = SKTypeface.FromFamilyName("Arial", style);
-                                            return typeface;
-                                        }
-                                    }
-                                }
-                                if (renderer.gs.TextFont.Typeface == null && fontDescriptor != null)
-                                {
-                                    var fontFlags = (FontDescriptorFlags)(int)fontDescriptor["Flags"];
-                                    string fontFamily = ((fontFlags & FontDescriptorFlags.Serif) > 0 || (baseFont != null && baseFont.StartsWith("Times"))) ? "Times New Roman" : "Arial";
-                                    var isItalic = (fontFlags & FontDescriptorFlags.Italic) > 0;
-                                    var isBold = (int?)fontDescriptor["FontWeight"] >= 700;
-                                    var style = (!isItalic && !isBold) ? SKFontStyle.Normal : (isItalic && isBold ? SKFontStyle.BoldItalic : (isItalic ? SKFontStyle.Italic : SKFontStyle.Bold));
-                                    renderer.gs.TextFont.Typeface = SKTypeface.FromFamilyName(fontFamily, style);
-                                }
+                                var fontPdfDict = resources.Font[inst.font].As<PdfDict>();
+                                renderer.fontDict.Add(inst.font, renderer.gs.TextFont = new Font(fontPdfDict));
                             }
                             if (renderer.gs.TextFont.Typeface != null)
                                 renderer.gs.OtherPaint.Typeface = renderer.gs.TextFont.Typeface;
                             break;
                         }
-                    case "Tc":
-                        renderer.gs.TextCharSpacing = (float)operands[0];
+                    case CS.Tc inst:
+                        renderer.gs.TextCharSpacing = inst.charSpace;
                         break;
-                    case "Tz":
-                        renderer.gs.TextTth = (float)operands[0] / 100;
+                    case CS.Tz inst:
+                        renderer.gs.TextTth = inst.scale / 100;
                         SetTextStateMatrix();
                         break;
-                    case "Tm":
+                    case CS.Tm inst:
                         {
-                            renderer.textLineMatrix = MatrixFromOperands();
+                            renderer.textLineMatrix = inst.Matrix;
                             renderer.textMatrix = renderer.textLineMatrix;
                             break;
                         }
-                    case "Tj":
+                    case CS.Tj inst:
                         {
-                            ShowText((PdfString)operands[0]);
+                            ShowText(inst.@string);
                             break;
                         }
-                    case "TJ":
+                    case CS.TJ inst:
                         {
-                            var arr = (PdfArray)operands[0];
-                            foreach (var item in arr)
+                            foreach (var item in inst.Array)
                             {
                                 if (item is PdfString pdfString)
                                 {
@@ -538,294 +306,312 @@ namespace SeaPeaYou.PeaPdf
                                 else
                                 {
                                     var point = renderer.gs.TextStateMatrix.MapPoint(-(float)item / 1000, 0);
-                                    SKMatrix.PreConcat(ref renderer.textMatrix, SKMatrix.MakeTranslation(point.X, 0));
+                                    renderer.textMatrix = renderer.textMatrix.PreConcat(SKMatrix.CreateTranslation(point.X, 0));
                                 }
                             }
                             break;
                         }
-                    case "TL":
-                        renderer.gs.TextLeading = (float)operands[0];
+                    case CS.TL inst:
+                        renderer.gs.TextLeading = inst.leading;
                         break;
-                    case "TD":
-                        renderer.gs.TextLeading = -(float)operands[1];
-                        goto case "Td";
-                    case "Td":
-                        SKMatrix.PreConcat(ref renderer.textLineMatrix, SKMatrix.MakeTranslation((float)operands[0], (float)operands[1]));
+                    case CS.TD inst:
+                        renderer.gs.TextLeading = -inst.ty;
+                        renderer.textLineMatrix = renderer.textLineMatrix.PreConcat(SKMatrix.CreateTranslation(inst.tx, inst.ty));
                         renderer.textMatrix = renderer.textLineMatrix;
                         break;
-                    case "T*":
-                        SKMatrix.PreConcat(ref renderer.textLineMatrix, SKMatrix.MakeTranslation(0, -renderer.gs.TextLeading));
+                    case CS.Td inst:
+                        renderer.textLineMatrix = renderer.textLineMatrix.PreConcat(SKMatrix.CreateTranslation(inst.tx, inst.ty));
                         renderer.textMatrix = renderer.textLineMatrix;
                         break;
-                    case "'":
-                        SKMatrix.PreConcat(ref renderer.textLineMatrix, SKMatrix.MakeTranslation(0, -renderer.gs.TextLeading));
+                    case CS.T_ inst:
+                        renderer.textLineMatrix = renderer.textLineMatrix.PreConcat(SKMatrix.CreateTranslation(0, -renderer.gs.TextLeading));
                         renderer.textMatrix = renderer.textLineMatrix;
-                        ShowText((PdfString)operands[0]);
                         break;
-                    case "\"":
-                        renderer.gs.TextWordSpacing = (float)operands[0];
-                        renderer.gs.TextCharSpacing = (float)operands[1];
-                        SKMatrix.PreConcat(ref renderer.textLineMatrix, SKMatrix.MakeTranslation(0, -renderer.gs.TextLeading));
+                    case CS.Apostrophe inst:
+                        renderer.textLineMatrix = renderer.textLineMatrix.PreConcat(SKMatrix.CreateTranslation(0, -renderer.gs.TextLeading));
                         renderer.textMatrix = renderer.textLineMatrix;
-                        ShowText((PdfString)operands[2]);
+                        ShowText(inst.@string);
                         break;
-                    case "Tw":
-                        renderer.gs.TextWordSpacing = (float)operands[0];
+                    case CS.Quote inst:
+                        renderer.gs.TextWordSpacing = inst.aw;
+                        renderer.gs.TextCharSpacing = inst.ac;
+                        renderer.textLineMatrix = renderer.textLineMatrix.PreConcat(SKMatrix.CreateTranslation(0, -renderer.gs.TextLeading));
+                        renderer.textMatrix = renderer.textLineMatrix;
+                        ShowText(inst.@string);
+                        break;
+                    case CS.Tw inst:
+                        renderer.gs.TextWordSpacing = inst.wordSpace;
                         break;
                     //xobjects
-                    case "Do":
+                    case CS.Do inst:
                         {
-                            var imgStream = resources["XObject"].As<PdfDict>()[(PdfName)operands[0]].As<PdfStream>();
+                            var imgStream = resources.XObject[inst.name].As<PdfStream>();
                             var subtype = imgStream.Dict["Subtype"].ToString();
                             if (subtype == "Image")
                             {
                                 int width = (int)imgStream.Dict["Width"], height = (int)imgStream.Dict["Height"],
                                     numPixels = width * height, bpc = (int)imgStream.Dict["BitsPerComponent"];
-                                var bytes = imgStream.GetBytes();
-                                var colorSpace = imgStream.Dict["ColorSpace"];
+                                byte[] imgBytes;
                                 SKColorSpace skColorSpace = null;
                                 SKAlphaType alphaType;
-                                byte[] imgBytes = new byte[numPixels * 4];
-
-                                if ((bool?)imgStream.Dict["ImageMask"] == true)
+                                var (bytes, filterName) = imgStream.GetDecodedBytesForImage();
+                                if (filterName == "DCTDecode")
                                 {
-                                    var decodeArr = (PdfArray)imgStream.Dict["Decode"];
-                                    var markVal = decodeArr != null ? (int)decodeArr[0] == 1 : false;
-                                    var byteReader = new ByteReader(bytes);
-                                    int ix = 0;
-                                    for (int y = 0; y < height; y++)
-                                    {
-                                        var bitReader = new BitReader(byteReader);
-                                        for (int x = 0; x < width; x++)
-                                        {
-                                            if (bitReader.ReadBit() == markVal)
-                                            {
-                                                imgBytes[ix++] = renderer.gs.OtherPaint.Color.Red;
-                                                imgBytes[ix++] = renderer.gs.OtherPaint.Color.Blue;
-                                                imgBytes[ix++] = renderer.gs.OtherPaint.Color.Green;
-                                                imgBytes[ix++] = 255;
-                                            }
-                                            else
-                                            {
-                                                ix += 3;
-                                                imgBytes[ix++] = 0;
-                                            }
-                                        }
-
-                                    }
-                                    alphaType = SKAlphaType.Unpremul;
+                                    imgBytes = Native.DecodeDCT(bytes, numPixels);
+                                    alphaType = SKAlphaType.Opaque;
+                                }
+                                else if (filterName == "JPXDecode")
+                                {
+                                    imgBytes = Native.DecodeJPX(bytes, numPixels);
+                                    alphaType = SKAlphaType.Opaque;
                                 }
                                 else
                                 {
-                                    int numComponents;
+                                    imgBytes = new byte[numPixels * 4];
 
-                                    if (colorSpace is PdfArray colorSpaceArr)
+                                    var colorSpace = imgStream.Dict["ColorSpace"];
+
+                                    if ((bool?)imgStream.Dict["ImageMask"] == true)
                                     {
-                                        switch (colorSpaceArr[0].ToString())
+                                        var decodeArr = (PdfArray)imgStream.Dict["Decode"];
+                                        var markVal = decodeArr != null ? (int)decodeArr[0] == 1 : false;
+                                        var byteReader = new ByteReader(bytes);
+                                        int ix = 0;
+                                        for (int y = 0; y < height; y++)
                                         {
-                                            case "Indexed":
-                                                {
-                                                    var indexObj = colorSpaceArr[3];
-                                                    byte[] indexData = indexObj is PdfStream indexStream ? indexStream.GetBytes() : ((PdfString)indexObj).Value;
-                                                    var baseColorSpace = colorSpaceArr[1];
-                                                    var colorSpaceStr = baseColorSpace.ToString();
-                                                    numComponents = colorSpaceStr == "DeviceGray" ? 1 : (colorSpaceStr == "DeviceCMYK" ? 4 : 3);
-                                                    var hival = (int)colorSpaceArr[2];
-                                                    var byteReader = new ByteReader(bytes);
-                                                    var i = 0;
-                                                    for (int y = 0; y < height; y++)
-                                                    {
-                                                        var bitStream = new BitReader(byteReader);
-                                                        for (int x = 0; x < width; x++)
-                                                        {
-                                                            Array.Copy(indexData, bitStream.ReadBits(bpc) * numComponents, imgBytes, i * 4, numComponents);
-                                                            if (numComponents == 1)
-                                                                imgBytes[i * 4 + 1] = imgBytes[i * 4 + 2] = imgBytes[i * 4];
-                                                            i++;
-                                                        }
-                                                    }
-                                                    if (colorSpaceStr == "DeviceCMYK")
-                                                    {
-                                                        throw new NotImplementedException("Indexed DeviceCMYK");
-                                                    }
-                                                    break;
-                                                }
-                                            case "CalRGB":
-                                                {
-                                                    var dict = (PdfDict)colorSpaceArr[1];
-                                                    var matrixArr = dict["Matrix"].As<PdfArray>().Select(x => (float)x).ToArray();
-                                                    var curMatrix = new ColorMatrix(matrixArr, 3, 3);
-                                                    numComponents = 3;
-                                                    for (int i = 0; i < numPixels; i++)
-                                                    {
-                                                        var pixBytes = new[] { bytes[i * 3 + 0] / 255f, bytes[i * 3 + 1] / 255f, bytes[i * 3 + 2] / 255f };
-                                                        var xyz = curMatrix.MultipleVectorWith(pixBytes);
-                                                        var rgb = ColorMatrix.sRGB.MultipleWithVector(xyz);
-
-                                                        imgBytes[i * 4 + 0] = (byte)Math.Max(0, Math.Min(255, (rgb[0] * 255)));
-                                                        imgBytes[i * 4 + 1] = (byte)Math.Max(0, Math.Min(255, (rgb[1] * 255)));
-                                                        imgBytes[i * 4 + 2] = (byte)Math.Max(0, Math.Min(255, (rgb[2] * 255)));
-                                                    }
-
-                                                    break;
-                                                }
-                                            case "ICCBased":
-                                                {
-                                                    var stream = (PdfStream)colorSpaceArr[1];
-                                                    var iccBytes = stream.GetBytes();
-                                                    skColorSpace = SKColorSpace.CreateIcc(iccBytes);
-                                                    for (int i = 0; i < numPixels; i++)
-                                                    {
-                                                        imgBytes[i * 4 + 0] = bytes[i * 3 + 0];
-                                                        imgBytes[i * 4 + 1] = bytes[i * 3 + 1];
-                                                        imgBytes[i * 4 + 2] = bytes[i * 3 + 2];
-                                                    }
-                                                    numComponents = 3;
-                                                    break;
-                                                }
-                                            default: throw new NotImplementedException();
-                                        }
-                                    }
-                                    else
-                                    {
-                                        switch (colorSpace.ToString())
-                                        {
-                                            case "DeviceGray":
-                                                {
-                                                    int imgBytesIX = 0;
-                                                    for (int i = 0; i < numPixels; i++)
-                                                    {
-                                                        var _b = bytes[i];
-                                                        imgBytes[imgBytesIX + 0] = imgBytes[imgBytesIX + 1] = imgBytes[imgBytesIX + 2] = _b;
-                                                        imgBytesIX += 4;
-                                                    }
-                                                    numComponents = 1;
-                                                    break;
-                                                }
-                                            case "DeviceRGB":
-                                                {
-                                                    for (int i = 0; i < numPixels; i++)
-                                                    {
-                                                        imgBytes[i * 4 + 0] = bytes[i * 3 + 0];
-                                                        imgBytes[i * 4 + 1] = bytes[i * 3 + 1];
-                                                        imgBytes[i * 4 + 2] = bytes[i * 3 + 2];
-                                                    }
-                                                    numComponents = 3;
-                                                    break;
-                                                }
-                                            case "DeviceCMYK":
-                                                {
-                                                    imgBytes = ColorHelper.CMYK2RGB(bytes);
-                                                    numComponents = 4;
-                                                    break;
-                                                }
-                                            default: throw new NotImplementedException();
-                                        }
-                                    }
-
-                                    alphaType = SKAlphaType.Opaque;
-
-                                    byte[] sMaskBytes = null;
-                                    var sMask = (PdfStream)imgStream.Dict["SMask"];
-
-                                    if (sMask != null)
-                                    {
-                                        var bitsPerComponent = (int)(sMask.Dict["BitsPerComponent"] ?? sMask.Dict["N"]);
-                                        switch (bitsPerComponent)
-                                        {
-                                            case 8: sMaskBytes = sMask.GetBytes(); break;
-                                            case 1:
-                                                {
-                                                    var _sMaskBytes = sMask.GetBytes();
-                                                    var sMaskByteReader = new ByteReader(_sMaskBytes);
-                                                    sMaskBytes = new byte[numPixels];
-                                                    int i = 0;
-                                                    for (int y = 0; y < height; y++)
-                                                    {
-                                                        var sMaskBitStream = new BitReader(sMaskByteReader);
-                                                        for (int x = 0; x < width; x++)
-                                                        {
-                                                            sMaskBytes[i++] = (byte)(sMaskBitStream.ReadBit() ? 255 : 0);
-                                                        }
-                                                    }
-                                                    break;
-                                                }
-                                        }
-                                    }
-                                    else
-                                    {
-                                        var mask = imgStream.Dict["Mask"]; //TODO color key masking
-                                        if (mask is PdfStream maskStream)
-                                        {
-                                            var decode = (PdfArray)maskStream.Dict["Decode"];
-                                            bool invert = decode != null && decode.Length == 2 && (int)decode[0] == 1;
-                                            var maskByteReader = new ByteReader(maskStream.GetBytes());
-                                            sMaskBytes = new byte[numPixels];
-                                            for (int y = 0; y < height; y++)
+                                            var bitReader = new BitReader(byteReader);
+                                            for (int x = 0; x < width; x++)
                                             {
-                                                var bitReader = new BitReader(maskByteReader);
-                                                for (int x = 0; x < width; x++)
+                                                if (bitReader.ReadBit() == markVal)
                                                 {
-                                                    if (bitReader.ReadBit() == invert)
-                                                        sMaskBytes[y * width + x] = 255;
+                                                    imgBytes[ix++] = renderer.gs.OtherPaint.Color.Red;
+                                                    imgBytes[ix++] = renderer.gs.OtherPaint.Color.Blue;
+                                                    imgBytes[ix++] = renderer.gs.OtherPaint.Color.Green;
+                                                    imgBytes[ix++] = 255;
+                                                }
+                                                else
+                                                {
+                                                    ix += 3;
+                                                    imgBytes[ix++] = 0;
                                                 }
                                             }
-                                        }
-                                        else if (mask is PdfArray maskArr)
-                                        {
-                                            alphaType = SKAlphaType.Unpremul;
-                                            List<byte[]> maskColors = new List<byte[]>();
-                                            var arrIX = 0;
-                                            while (arrIX < maskArr.Length)
-                                            {
-                                                var maskColor = new byte[3];
-                                                for (int i = 0; i < numComponents; i++)
-                                                {
-                                                    maskColor[i] = (byte)(int)maskArr[arrIX++];
-                                                }
-                                                if (numComponents == 1)
-                                                    maskColor[2] = maskColor[1] = maskColor[0];
-                                                maskColors.Add(maskColor);
-                                            }
-                                            for (int i = 0; i < numPixels; i++)
-                                            {
-                                                bool masked = false;
-                                                var pixelIX = i * 4;
-                                                foreach (var maskColor in maskColors)
-                                                {
-                                                    int j;
-                                                    for (j = 0; j < 3; j++)
-                                                    {
-                                                        if (imgBytes[pixelIX + j] != maskColor[j])
-                                                            break;
-                                                    }
-                                                    if (j == 3)
-                                                    {
-                                                        masked = true;
-                                                        break;
-                                                    }
-                                                }
-                                                if (!masked)
-                                                    imgBytes[pixelIX + 3] = 255;
-                                            }
-                                        }
-                                    }
 
-                                    if (sMaskBytes != null)
-                                    {
-                                        for (int i = 0; i < numPixels; i++)
-                                        {
-                                            imgBytes[i * 4 + 3] = sMaskBytes[i];
                                         }
                                         alphaType = SKAlphaType.Unpremul;
                                     }
-                                    if (alphaType == SKAlphaType.Opaque)
+                                    else
                                     {
-                                        var ix = -1;
-                                        for (int i = 0; i < numPixels; i++)
+                                        int numComponents;
+
+                                        if (colorSpace is PdfArray colorSpaceArr)
                                         {
-                                            ix += 4;
-                                            imgBytes[ix] = 255;
+                                            switch (colorSpaceArr[0].ToString())
+                                            {
+                                                case "Indexed":
+                                                    {
+                                                        var indexObj = colorSpaceArr[3];
+                                                        byte[] indexData = indexObj is PdfStream indexStream ? indexStream.GetDecodedBytes() : ((PdfString)indexObj).Value;
+                                                        var baseColorSpace = colorSpaceArr[1];
+                                                        var colorSpaceStr = baseColorSpace.ToString();
+                                                        numComponents = colorSpaceStr == "DeviceGray" ? 1 : (colorSpaceStr == "DeviceCMYK" ? 4 : 3);
+                                                        var hival = (int)colorSpaceArr[2];
+                                                        var byteReader = new ByteReader(bytes);
+                                                        var i = 0;
+                                                        for (int y = 0; y < height; y++)
+                                                        {
+                                                            var bitStream = new BitReader(byteReader);
+                                                            for (int x = 0; x < width; x++)
+                                                            {
+                                                                Array.Copy(indexData, bitStream.ReadBits(bpc) * numComponents, imgBytes, i * 4, numComponents);
+                                                                if (numComponents == 1)
+                                                                    imgBytes[i * 4 + 1] = imgBytes[i * 4 + 2] = imgBytes[i * 4];
+                                                                i++;
+                                                            }
+                                                        }
+                                                        if (colorSpaceStr == "DeviceCMYK")
+                                                        {
+                                                            imgBytes = ColorHelper.CMYK2RGB(imgBytes);
+                                                            //throw new NotImplementedException("Indexed DeviceCMYK");
+                                                        }
+                                                        break;
+                                                    }
+                                                case "CalRGB":
+                                                    {
+                                                        var dict = (PdfDict)colorSpaceArr[1];
+                                                        var matrixArr = dict["Matrix"].As<PdfArray>().Select(x => (float)x).ToArray();
+                                                        var curMatrix = new ColorMatrix(matrixArr, 3, 3);
+                                                        numComponents = 3;
+                                                        for (int i = 0; i < numPixels; i++)
+                                                        {
+                                                            var pixBytes = new[] { bytes[i * 3 + 0] / 255f, bytes[i * 3 + 1] / 255f, bytes[i * 3 + 2] / 255f };
+                                                            var xyz = curMatrix.MultipleVectorWith(pixBytes);
+                                                            var rgb = ColorMatrix.sRGB.MultipleWithVector(xyz);
+
+                                                            imgBytes[i * 4 + 0] = (byte)Math.Max(0, Math.Min(255, (rgb[0] * 255)));
+                                                            imgBytes[i * 4 + 1] = (byte)Math.Max(0, Math.Min(255, (rgb[1] * 255)));
+                                                            imgBytes[i * 4 + 2] = (byte)Math.Max(0, Math.Min(255, (rgb[2] * 255)));
+                                                        }
+
+                                                        break;
+                                                    }
+                                                case "ICCBased":
+                                                    {
+                                                        var stream = (PdfStream)colorSpaceArr[1];
+                                                        var iccBytes = stream.GetDecodedBytes();
+                                                        skColorSpace = SKColorSpace.CreateIcc(iccBytes);
+                                                        for (int i = 0; i < numPixels; i++)
+                                                        {
+                                                            imgBytes[i * 4 + 0] = bytes[i * 3 + 0];
+                                                            imgBytes[i * 4 + 1] = bytes[i * 3 + 1];
+                                                            imgBytes[i * 4 + 2] = bytes[i * 3 + 2];
+                                                        }
+                                                        numComponents = 3;
+                                                        break;
+                                                    }
+                                                default: throw new NotImplementedException();
+                                            }
+                                        }
+                                        else
+                                        {
+                                            switch (colorSpace.ToString())
+                                            {
+                                                case "DeviceGray":
+                                                    {
+                                                        int imgBytesIX = 0;
+                                                        for (int i = 0; i < numPixels; i++)
+                                                        {
+                                                            var _b = bytes[i];
+                                                            imgBytes[imgBytesIX + 0] = imgBytes[imgBytesIX + 1] = imgBytes[imgBytesIX + 2] = _b;
+                                                            imgBytesIX += 4;
+                                                        }
+                                                        numComponents = 1;
+                                                        break;
+                                                    }
+                                                case "DeviceRGB":
+                                                    {
+                                                        for (int i = 0; i < numPixels; i++)
+                                                        {
+                                                            imgBytes[i * 4 + 0] = bytes[i * 3 + 0];
+                                                            imgBytes[i * 4 + 1] = bytes[i * 3 + 1];
+                                                            imgBytes[i * 4 + 2] = bytes[i * 3 + 2];
+                                                        }
+                                                        numComponents = 3;
+                                                        break;
+                                                    }
+                                                case "DeviceCMYK":
+                                                    {
+                                                        imgBytes = ColorHelper.CMYK2RGB(bytes);
+                                                        numComponents = 4;
+                                                        break;
+                                                    }
+                                                default: throw new NotImplementedException();
+                                            }
+                                        }
+
+                                        alphaType = SKAlphaType.Opaque;
+
+                                        byte[] sMaskBytes = null;
+                                        var sMask = (PdfStream)imgStream.Dict["SMask"];
+
+                                        if (sMask != null)
+                                        {
+                                            var bitsPerComponent = (int)(sMask.Dict["BitsPerComponent"] ?? sMask.Dict["N"]);
+                                            switch (bitsPerComponent)
+                                            {
+                                                case 8: sMaskBytes = sMask.GetDecodedBytes(); break;
+                                                case 1:
+                                                    {
+                                                        var _sMaskBytes = sMask.GetDecodedBytes();
+                                                        var sMaskByteReader = new ByteReader(_sMaskBytes);
+                                                        sMaskBytes = new byte[numPixels];
+                                                        int i = 0;
+                                                        for (int y = 0; y < height; y++)
+                                                        {
+                                                            var sMaskBitStream = new BitReader(sMaskByteReader);
+                                                            for (int x = 0; x < width; x++)
+                                                            {
+                                                                sMaskBytes[i++] = (byte)(sMaskBitStream.ReadBit() ? 255 : 0);
+                                                            }
+                                                        }
+                                                        break;
+                                                    }
+                                            }
+                                        }
+                                        else
+                                        {
+                                            var mask = imgStream.Dict["Mask"]; //TODO color key masking
+                                            if (mask is PdfStream maskStream)
+                                            {
+                                                var decode = (PdfArray)maskStream.Dict["Decode"];
+                                                bool invert = decode != null && decode.Count == 2 && (int)decode[0] == 1;
+                                                var maskByteReader = new ByteReader(maskStream.GetDecodedBytes());
+                                                sMaskBytes = new byte[numPixels];
+                                                for (int y = 0; y < height; y++)
+                                                {
+                                                    var bitReader = new BitReader(maskByteReader);
+                                                    for (int x = 0; x < width; x++)
+                                                    {
+                                                        if (bitReader.ReadBit() == invert)
+                                                            sMaskBytes[y * width + x] = 255;
+                                                    }
+                                                }
+                                            }
+                                            else if (mask is PdfArray maskArr)
+                                            {
+                                                alphaType = SKAlphaType.Unpremul;
+                                                List<byte[]> maskColors = new List<byte[]>();
+                                                var arrIX = 0;
+                                                while (arrIX < maskArr.Count)
+                                                {
+                                                    var maskColor = new byte[3];
+                                                    for (int i = 0; i < numComponents; i++)
+                                                    {
+                                                        maskColor[i] = (byte)(int)maskArr[arrIX++];
+                                                    }
+                                                    if (numComponents == 1)
+                                                        maskColor[2] = maskColor[1] = maskColor[0];
+                                                    maskColors.Add(maskColor);
+                                                }
+                                                for (int i = 0; i < numPixels; i++)
+                                                {
+                                                    bool masked = false;
+                                                    var pixelIX = i * 4;
+                                                    foreach (var maskColor in maskColors)
+                                                    {
+                                                        int j;
+                                                        for (j = 0; j < 3; j++)
+                                                        {
+                                                            if (imgBytes[pixelIX + j] != maskColor[j])
+                                                                break;
+                                                        }
+                                                        if (j == 3)
+                                                        {
+                                                            masked = true;
+                                                            break;
+                                                        }
+                                                    }
+                                                    if (!masked)
+                                                        imgBytes[pixelIX + 3] = 255;
+                                                }
+                                            }
+                                        }
+
+                                        if (sMaskBytes != null)
+                                        {
+                                            for (int i = 0; i < numPixels; i++)
+                                            {
+                                                imgBytes[i * 4 + 3] = sMaskBytes[i];
+                                            }
+                                            alphaType = SKAlphaType.Unpremul;
+                                        }
+                                        if (alphaType == SKAlphaType.Opaque)
+                                        {
+                                            var ix = -1;
+                                            for (int i = 0; i < numPixels; i++)
+                                            {
+                                                ix += 4;
+                                                imgBytes[ix] = 255;
+                                            }
                                         }
                                     }
                                 }
@@ -843,49 +629,31 @@ namespace SeaPeaYou.PeaPdf
                             }
                             else if (subtype == "Form")
                             {
-                                var stream = (PdfStream)resources["XObject"].As<PdfDict>()[(PdfName)operands[0]];
+                                var stream = (PdfStream)resources.XObject[inst.name];
                                 if (stream != null)
                                 {
                                     var matrixArr = (PdfArray)stream.Dict["Matrix"];
                                     renderer.canvas.Save();
                                     if (matrixArr != null)
                                     {
-                                        var matrix = MatrixFromArray(matrixArr);
+                                        var matrix = Utils.MatrixFromArray(matrixArr);
                                         renderer.canvas.SetMatrix(Utils.MatrixConcat(renderer.canvas.TotalMatrix, matrix));
                                     }
-                                    new DrawContext(renderer, stream.GetBytes(), (PdfDict)stream.Dict["Resources"]);
+                                    new DrawContext(renderer, new W.ContentStream(stream, null));
                                     renderer.canvas.Restore();
                                 }
                             }
                             break;
                         }
-                    case "BI":
+                    case CS.BI inst:
                         {
-                            fParse.SkipWhiteSpace();
-                            var dict = new Dictionary<PdfName, PdfObject>();
-                            while (!fParse.ReadString("ID"))
-                            {
-                                var name = new PdfName(fParse);
-                                fParse.SkipWhiteSpace();
-                                var obj = fParse.ReadPdfObject(null);
-                                fParse.SkipWhiteSpace();
-                                dict.Add(name, obj);
-                            }
-                            var decode = (PdfArray)(dict.GetValueOrDefault("Decode") ?? dict.GetValueOrDefault("D"));
-                            bool invert = decode != null && decode.Length == 2 && (int)decode[0] == 1;
-
-                            fParse.Pos++;
-                            var imgBytes = new List<byte>();
-                            while (fParse.PeekByte != 'E' || fParse.PeekByteAtOffset(1) != 'I')
-                            {
-                                imgBytes.Add(fParse.ReadByte());
-                            }
-                            fParse.ReadString("EI");
-                            int width = (int)(dict["W"] ?? dict["Width"]),
-                                height = (int)(dict["H"] ?? dict["Height"]);
+                            var decode = (PdfArray)(inst.Dict.GetValueOrDefault("Decode") ?? inst.Dict.GetValueOrDefault("D"));
+                            bool invert = decode != null && decode.Count == 2 && (int)decode[0] == 1;
+                            int width = (int)(inst.Dict["W"] ?? inst.Dict["Width"]),
+                                height = (int)(inst.Dict["H"] ?? inst.Dict["Height"]);
                             var bmp = new SKBitmap(new SKImageInfo { Width = width, Height = height, ColorType = SKColorType.Rgba8888, AlphaType = SKAlphaType.Unpremul });
                             bmp.Erase(SKColors.Transparent);
-                            var imgByteReader = new ByteReader(imgBytes.ToArray());
+                            var imgByteReader = new ByteReader(inst.ImgBytes);
                             for (int y = 0; y < height; y++)
                             {
                                 var bitStream = new BitReader(imgByteReader);
@@ -902,7 +670,7 @@ namespace SeaPeaYou.PeaPdf
                             renderer.canvas.Restore();
                             break;
                         }
-                    case "Tr":
+                    case CS.Tr inst:
                         break;
                     default:
                         break;
@@ -910,18 +678,17 @@ namespace SeaPeaYou.PeaPdf
 
             }
 
-            SKMatrix MatrixFromOperands() => MatrixFromArray(operands);
-            SKColor RGBFromOperands()
+            SKColor RGBFromOperands(IList<PdfObject> operands)
             {
                 var colors = operands.Select(x => (byte)Math.Round((float)x * 255)).ToArray();
                 return new SKColor(colors[0], colors[1], colors[2]);
             }
-            SKColor GrayFromOperands()
+            SKColor GrayFromOperands(IList<PdfObject> operands)
             {
                 var c = (byte)((float)operands[0] * 255);
                 return new SKColor(c, c, c);
             }
-            SKColor CMYKFromOperands() => ColorHelper.CMYK2RGB(operands.Select(x => (float)x).ToArray());
+            SKColor CMYKFromOperands(IList<PdfObject> operands) => ColorHelper.CMYK2RGB_Single(operands.Select(x => (float)x).ToArray());
             void EndPath()
             {
                 curPath = new SKPath();
@@ -939,7 +706,7 @@ namespace SeaPeaYou.PeaPdf
                 if (renderer.gs.TextFont.Type3Font != null)
                 {
                     var charProcs = (PdfDict)renderer.gs.TextFont.Type3Font["CharProcs"];
-                    var fontMatrix = MatrixFromArray(renderer.gs.TextFont.Type3Font["FontMatrix"].As<PdfArray>());
+                    var fontMatrix = Utils.MatrixFromArray(renderer.gs.TextFont.Type3Font["FontMatrix"].As<PdfArray>());
                     var textStateFontMatrix = Utils.MatrixConcat(renderer.gs.TextStateMatrix, fontMatrix);
                     for (var i = 0; i < str.Value.Length; i += 1)
                     {
@@ -950,15 +717,14 @@ namespace SeaPeaYou.PeaPdf
                         if (renderer.gs.TextFont.Code2Names == null || !renderer.gs.TextFont.Code2Names.TryGetValue(b, out var name))
                             name = renderer.gs.TextFont.Encoding.Code2Name(b);
                         var glyphDesc = (PdfStream)charProcs[name];
-                        var glyphContents = glyphDesc.GetBytes();
-                        new DrawContext(renderer, glyphContents, resources);
+                        new DrawContext(renderer, new W.ContentStream(glyphDesc, resources));
                         float glyphWidth = 0;
                         if (renderer.gs.TextFont.Widths != null && renderer.gs.TextFont.FirstChar != null)
                         {
                             glyphWidth = renderer.gs.TextFont.Widths[b - renderer.gs.TextFont.FirstChar.Value];
                         }
                         var effWidth = textStateFontMatrix.MapPoint(glyphWidth, 0).X + renderer.gs.TextCharSpacing;
-                        SKMatrix.PreConcat(ref renderer.textMatrix, SKMatrix.MakeTranslation(effWidth, 0));
+                        renderer.textMatrix = renderer.textMatrix.PreConcat(SKMatrix.CreateTranslation(effWidth, 0));
                     }
                 }
                 else
@@ -994,7 +760,7 @@ namespace SeaPeaYou.PeaPdf
                                 int? unicode = null;
                                 if (renderer.gs.TextFont.Code2Names != null && renderer.gs.TextFont.Code2Names.TryGetValue(b, out var bName))
                                 {
-                                    if (CharEncoding.UnicodeByName.TryGetValue(bName.ToString(), out var _unicode))
+                                    if (CharEncoding.UnicodeByName.TryGetValue(bName, out var _unicode))
                                         unicode = _unicode;
                                 }
                                 if (unicode == null)
@@ -1019,7 +785,7 @@ namespace SeaPeaYou.PeaPdf
                         var effWidth = renderer.gs.TextStateMatrix.MapPoint(glyphWidth, 0).X + renderer.gs.TextCharSpacing;
                         if (b == 32)
                             effWidth += renderer.gs.TextWordSpacing;
-                        SKMatrix.PreConcat(ref renderer.textMatrix, SKMatrix.MakeTranslation(effWidth, 0));
+                        renderer.textMatrix = renderer.textMatrix.PreConcat(SKMatrix.CreateTranslation(effWidth, 0));
                     }
                 }
             }

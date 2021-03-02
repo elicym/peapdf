@@ -4,50 +4,22 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <Platforms>AnyCPU;x64;x86</Platforms>
     <Authors>Elliott Cymerman</Authors>
-    <Product>PeaPDF</Product>
-    <Description>PeaPDF renders PDFs, allowing them to be converted to an image, or displayed in an application.</Description>
-    <Copyright></Copyright>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/elicym/peapdf</PackageProjectUrl>
-    <PackageTags>pdf render draw display convert image</PackageTags>
-    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <Version>0.1.0</Version>
+    <Product>PeaPdf</Product>
+    <Version>1.0.0</Version>
     <RootNamespace>SeaPeaYou.PeaPdf</RootNamespace>
     <AssemblyName>PeaPdf</AssemblyName>
-    <PackageId>SeaPeaYou.PeaPDF</PackageId>
+    <PackageId>SeaPeaYou.PeaPdf</PackageId>
     <Company>SeaPeaYou</Company>
-      <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <FileVersion>0.1.0.0</FileVersion>
+      <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
     <LangVersion>8.0</LangVersion>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>1701;1702;NU5100</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SkiaSharp" Version="1.68.0" />
-    <PackageReference Include="System.Memory" Version="4.5.3" />
+    <PackageReference Include="SkiaSharp" Version="1.68.3" />
+    <PackageReference Include="System.Memory" Version="4.5.4" />
   </ItemGroup>
 
   <ItemGroup>
@@ -71,6 +43,38 @@
   
   <ItemGroup>
     <Content Include="runtimes\**" PackagePath="runtimes" Visible="false" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <None Remove="Native\PeaPdfNative_Win32.exp" />
+    <None Remove="Native\PeaPdfNative_Win32.ilk" />
+    <None Remove="Native\PeaPdfNative_Win32.iobj" />
+    <None Remove="Native\PeaPdfNative_Win32.ipdb" />
+    <None Remove="Native\PeaPdfNative_Win32.lib" />
+    <None Remove="Native\PeaPdfNative_Win32.pdb" />
+    <None Remove="Native\PeaPdfNative_x64.exp" />
+    <None Remove="Native\PeaPdfNative_x64.ilk" />
+    <None Remove="Native\PeaPdfNative_x64.iobj" />
+    <None Remove="Native\PeaPdfNative_x64.ipdb" />
+    <None Remove="Native\PeaPdfNative_x64.lib" />
+    <None Remove="Native\PeaPdfNative_x64.pdb" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <None Update="Native\PeaPdfNative_Win32.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  <Pack>true</Pack>
+	  <PackageCopyToOutput>true</PackageCopyToOutput>
+    </None>
+    <None Update="Native\PeaPdfNative_x64.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+      <Pack>true</Pack>
+    </None>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Folder Include="Native\" />
   </ItemGroup>
   
 </Project>

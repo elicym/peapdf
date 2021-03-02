@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemGroup Condition=" '$(PlatformTarget)' == 'x86' ">
+    <None Include="$(MSBuildThisFileDirectory)..\..\runtimes\win-x86\native\PeaPdfNative.dll">
+      <Link>runtimes\win-x86\native\PeaPdfNative.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  
+  <ItemGroup Condition=" '$(PlatformTarget)' == 'x64' ">
+    <None Include="$(MSBuildThisFileDirectory)..\..\runtimes\win-x64\native\PeaPdfNative.dll">
+      <Link>runtimes\win-x64\native\PeaPdfNative.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(PlatformTarget)' == 'AnyCPU' ">
+    <None Include="$(MSBuildThisFileDirectory)..\..\runtimes\win-x86\native\PeaPdfNative.dll">
+      <Link>runtimes\win-x86\native\PeaPdfNative.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="$(MSBuildThisFileDirectory)..\..\runtimes\win-x64\native\PeaPdfNative.dll">
+      <Link>runtimes\win-x64\native\PeaPdfNative.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+    
+</Project>

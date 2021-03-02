@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2020 Elliott Cymerman
+ * Copyright 2021 Elliott Cymerman
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -82,7 +82,7 @@ namespace SeaPeaYou.PeaPdf
             return font;
         }
 
-        public static OTFFont FromCFF(byte[] bytes, CharEncoding encoding, Dictionary<byte, PdfName> code2Names)
+        public static OTFFont FromCFF(byte[] bytes, CharEncoding encoding, Dictionary<byte, string> code2Names)
         {
             var font = new OTFFont();
             font.LoadFromCFF(bytes, encoding, code2Names);
@@ -126,7 +126,7 @@ namespace SeaPeaYou.PeaPdf
             }
         }
 
-        void LoadFromCFF(byte[] bytes, CharEncoding encoding, Dictionary<byte, PdfName> code2Names)
+        void LoadFromCFF(byte[] bytes, CharEncoding encoding, Dictionary<byte, string> code2Names)
         {
             isCFF = true;
             tableRecords = new TableRecords();
@@ -434,7 +434,7 @@ namespace SeaPeaYou.PeaPdf
                 }
             }
 
-            public Table_cmap(IList<int> sids, CharEncoding encoding, Dictionary<byte, PdfName> code2Names, List<string> extraNames)
+            public Table_cmap(IList<int> sids, CharEncoding encoding, Dictionary<byte, string> code2Names, List<string> extraNames)
             {
                 Dictionary<int, byte> nameDict = null;
                 if (code2Names != null)
@@ -444,7 +444,7 @@ namespace SeaPeaYou.PeaPdf
                         name2SIDs.Add(extraNames[i], CFF.MaxStandardSID + 1 + i);
                     nameDict = code2Names?.Select(x =>
                     {
-                        var sid = name2SIDs.TryGetValue(x.Value.ToString(), out var s) ? s : (int?)null;
+                        var sid = name2SIDs.TryGetValue(x.Value, out var s) ? s : (int?)null;
                         return new { sid, code = x.Key };
                     }).Where(x => x.sid != null).ToDictionary(x => x.sid.Value, x => x.code);
                 }
